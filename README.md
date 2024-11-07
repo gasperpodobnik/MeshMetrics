@@ -20,6 +20,13 @@ Podobnik, G., & Vrtovec, T. (2024). Metrics Revolutions: Groundbreaking Insights
 ```
 
 ## Installation
+### System Dependencies
+This package requires `libxrender1` to be installed on your system. Install it via:
+```bash
+sudo apt update && sudo apt install -y libxrender1
+```
+
+### Install `MeshMetrics` package
 First, clone the repository and install the required dependencies along with the `MeshMetrics` package using pip:
 ```bash
 $ git clone https://github.com/gasperpodobnik/MeshMetrics.git
@@ -37,20 +44,21 @@ ref_mask, pred_mask, spacing = ..., ..., ...
 distance_metrics.set_input(ref_mask=ref_mask, pred_mask=pred_mask, spacing=spacing)
 
 # Hausdorff Distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
-hd100 = metric.hd()
+hd100 = distance_metrics.hd()
 # 95th percentile HD
-hd95 = metric.hd(percentile=95)
+hd95 = distance_metrics.hd(percentile=95)
 # Mean Average Surface Distance (MASD)
-masd = metric.masd()
+masd = distance_metrics.masd()
 # Average Symmetric Surface Distance (ASSD)
-assd = metric.assd()
+assd = distance_metrics.assd()
 # Normalized Surface Distance (NSD) with tau=2
-nsd2 = metric.nsd(tau=2)
+nsd2 = distance_metrics.nsd(tau=2)
 # Boundary Intersection over Union (BIoU) with tau=2
-biou2 = metric.biou(tau=2)
+biou2 = distance_metrics.biou(tau=2)
 
 # ----------------------------------------
 # if loading masks from files with SimpleITK library, note that spacing needs to be reordered
+import SimpleITK as sitk
 ref_path, pred_path = ..., ...
 ref_sitk, pred_sitk = sitk.ReadImage(ref_path), sitk.ReadImage(pred_path)
 ref_mask = sitk.GetArrayFromImage(ref_sitk).astype(bool)
