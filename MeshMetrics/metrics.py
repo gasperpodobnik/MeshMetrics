@@ -51,7 +51,7 @@ class DistanceMetrics:
     def ref_mask(self, value):
         assert isinstance(value, np.ndarray), "mask must be a numpy array"
         assert value.dtype == bool, "mask must be a boolean array"
-        self._ref_mask = value
+        self._ref_mask = value.astype('uint8')
 
     @property
     def pred_mask(self):
@@ -61,7 +61,7 @@ class DistanceMetrics:
     def pred_mask(self, value):
         assert isinstance(value, np.ndarray), "mask must be a numpy array"
         assert value.dtype == bool, "mask must be a boolean array"
-        self._pred_mask = value
+        self._pred_mask = value.astype('uint8')
 
     @property
     def spacing(self):
@@ -79,13 +79,13 @@ class DistanceMetrics:
     @property
     @lru_cache
     def ref_mesh(self):
-        ref_sitk_3D = np2sitk(self.ref_mask.astype(np.uint8), spacing=self.spacing)
+        ref_sitk_3D = np2sitk(self.ref_mask, spacing=self.spacing)
         return vtk_3D_meshing(ref_sitk_3D)
         
     @property
     @lru_cache
     def pred_mesh(self):
-        pred_sitk_3D = np2sitk(self.pred_mask.astype(np.uint8), spacing=self.spacing)
+        pred_sitk_3D = np2sitk(self.pred_mask, spacing=self.spacing)
         return vtk_3D_meshing(pred_sitk_3D)
 
     # fmt: off
