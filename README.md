@@ -38,23 +38,23 @@ $ pip install MeshMetrics/
 from MeshMetrics import DistanceMetrics
 
 # initialize DistanceMetrics object
-distance_metrics = DistanceMetrics()
+dist_metrics = DistanceMetrics()
 # set input masks and spacing, masks should be boolean numpy arrays
 ref_mask, pred_mask, spacing = ..., ..., ...
-distance_metrics.set_input(ref_mask=ref_mask, pred_mask=pred_mask, spacing=spacing)
+dist_metrics.set_input(ref_mask=ref_mask, pred_mask=pred_mask, spacing=spacing)
 
 # Hausdorff Distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
-hd100 = distance_metrics.hd()
+hd100 = dist_metrics.hd()
 # 95th percentile HD
-hd95 = distance_metrics.hd(percentile=95)
+hd95 = dist_metrics.hd(percentile=95)
 # Mean Average Surface Distance (MASD)
-masd = distance_metrics.masd()
+masd = dist_metrics.masd()
 # Average Symmetric Surface Distance (ASSD)
-assd = distance_metrics.assd()
+assd = dist_metrics.assd()
 # Normalized Surface Distance (NSD) with tau=2
-nsd2 = distance_metrics.nsd(tau=2)
+nsd2 = dist_metrics.nsd(tau=2)
 # Boundary Intersection over Union (BIoU) with tau=2
-biou2 = distance_metrics.biou(tau=2)
+biou2 = dist_metrics.biou(tau=2)
 
 # ----------------------------------------
 # if loading masks from files with SimpleITK library, note that spacing needs to be reordered
