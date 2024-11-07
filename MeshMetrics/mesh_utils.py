@@ -321,8 +321,6 @@ def vtk_compute_normals(mesh: vtk.vtkPolyData) -> vtk.vtkPolyData:
 
 
 def vtk_signed_distance(vtk_mesh, dist, bounds, size):
-    import SimpleITK.utilities as sitkutils  # try to eliminate this dependency
-
     distance_filter = vtk.vtkSignedDistance()
     distance_filter.SetInputData(vtk_mesh)
     distance_filter.SetRadius(dist)  # Radius to compute signed distance within
