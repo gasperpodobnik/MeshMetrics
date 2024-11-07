@@ -26,8 +26,8 @@ def sitk2np(sitk_img: sitk.Image) -> np.ndarray:
 
 def sitk_add_axis(img_sitk_2d):
     ref_np_3d = sitk2np(img_sitk_2d)[..., np.newaxis]
-    img_sitk_3d = np2sitk(ref_np_3d)
-    img_sitk_3d.SetSpacing((*img_sitk_2d.GetSpacing(), 1.0))
+    spacing = (*img_sitk_2d.GetSpacing(), 1.0)
+    img_sitk_3d = np2sitk(ref_np_3d, spacing=spacing)
     img_sitk_3d.SetOrigin((*img_sitk_2d.GetOrigin(), 0.0))
     return img_sitk_3d
 
