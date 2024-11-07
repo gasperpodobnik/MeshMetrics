@@ -5,7 +5,7 @@ import numpy as np
 import SimpleITK as sitk
 import logging
 
-import SimpleITK.utilities as sitkutils
+from SimpleITK.utilities.vtk import sitk2vtk, vtk2sitk
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 
@@ -126,7 +126,7 @@ def vtk_2D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
     # pad to avoid potential open boundary related issues
     src_img = sitk.ConstantPad(src_img, (1, 1), (1, 1), 0)
 
-    vtkImage = sitkutils.sitk2vtk(src_img > 0)
+    vtkImage = sitk2vtk(src_img > 0)
 
     meshing_alg = vtk.vtkDiscreteFlyingEdges2D()
     meshing_alg.SetInputData(vtkImage)
@@ -149,7 +149,7 @@ def vtk_3D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
 
     if sitk.GetArrayFromImage(src_img).sum() == 0:
         return None
-    vtkImage = sitkutils.sitk2vtk(src_img > 0)
+    vtkImage = sitk2vtk(src_img > 0)
 
     # segmentation --> polygonal data:
     meshing_alg = vtk.vtkDiscreteMarchingCubes()
@@ -327,7 +327,7 @@ def vtk_signed_distance(vtk_mesh, dist, bounds, size):
     distance_filter.SetBounds(bounds)
     distance_filter.SetDimensions(size)
     distance_filter.Update()
-    distance_field_sitk = sitkutils.vtk2sitk(distance_filter.GetOutput())
+    distance_field_sitk = vtk2sitk(distance_filter.GetOutput())
     return distance_field_sitk
 
 
