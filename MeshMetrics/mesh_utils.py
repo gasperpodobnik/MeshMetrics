@@ -218,7 +218,7 @@ def vtk_centroids2contour_measurements(
     pred_contour: vtk.vtkPolyData,
     pred_surface: vtk.vtkPolyData,
     subdivide_iter: int = 0,
-) -> dict:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Calculate distances between centroids of triangles and surface represented by the mesh.
     Function calculates in both directions and also returns the areas of surface elements (surfels).
 
@@ -262,7 +262,7 @@ def vtk_centroids2surface_measurements(
     ref_mesh: vtk.vtkPolyData,
     pred_mesh: vtk.vtkPolyData,
     subdivide_iter: int = 0,
-) -> dict:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Calculate distances between centroids of triangles and surface represented by the mesh.
     Function calculates in both directions and also returns the areas of surface elements (surfels).
 
@@ -330,36 +330,54 @@ def vtk_signed_distance(vtk_mesh, dist, bounds, size):
     distance_field_sitk = vtk2sitk(distance_filter.GetOutput())
     return distance_field_sitk
 
+def implicit_signed_distance(vtk_mesh, origin, diagonal, spacing):
+    ox, oy, oz = origin
+    dx, dy, dz = diagonal
+    sx, sy, sz = spacing
+    
+    # stack meshgrid
+    pts = np.stack(np.meshgrid(np.arange(ox, dx+sx, sx), np.arange(oy, dy+sy, sy), np.arange(oz, dz+sz, sz), indexing='ij'), axis=-1)
+    # flatten in a list of 3d points
+    pts_reshaped = pts.reshape(-1, 3)
+    out = np.empty(pts_reshaped.shape[0])
+    
+    vtk_p2s_dist = vtk.vtkImplicitPolyDataDistance()
+    vtk_p2s_dist.SetInput(vtk_mesh)
+    for enum, pt in enumerate(pts_reshaped):
+        out[enum] = vtk_p2s_dist.FunctionValue(pt)
+    out = out.reshape(pts.shape[:-1])
+    
+    distance_field = np2sitk(out)
+    distance_field.SetOrigin(origin)
+    distance_field.SetSpacing(spacing)
+    return distance_field
 
-def get_hollow_meshes(
+def get_boundary_region(
     ref_mesh: vtk.vtkPolyData, pred_mesh: vtk.vtkPolyData, spacing: tuple, tau: float
 ):
     assert tau > 0, "Distance must be positive"
-
-    ref_origin = np.array(ref_mesh.GetBounds()[::2])
-    ref_diagonal = np.array(ref_mesh.GetBounds()[1::2])
-    pred_origin = np.array(pred_mesh.GetBounds()[::2])
-    pred_diagonal = np.array(pred_mesh.GetBounds()[1::2])
+    
+    r_b = np.array(ref_mesh.GetBounds())
+    p_b = np.array(pred_mesh.GetBounds())
+    ref_origin, ref_diagonal =r_b[::2], r_b[1::2]
+    pred_origin, pred_diagonal = p_b[::2], p_b[1::2]
+    
+    # find element-wise minimum and maximum
     _origin = np.minimum(ref_origin, pred_origin)
     _diagonal = np.maximum(ref_diagonal, pred_diagonal)
-    bounds = np.zeros(6)
-    bounds[::2] = _origin
-    bounds[1::2] = _diagonal
 
     _spacing = np.array(spacing) / 5
-    size = ((_diagonal - _origin) / _spacing).astype(int).tolist()
-
-    ref_mesh_normals = vtk_compute_normals(ref_mesh)
-    ref_dist_field_sitk = vtk_signed_distance(ref_mesh_normals, tau, bounds, size)
-    pred_mesh_normals = vtk_compute_normals(pred_mesh)
-    pred_dist_field_sitk = vtk_signed_distance(pred_mesh_normals, tau, bounds, size)
+    if len(spacing) == 2:
+        _spacing = np.append(_spacing, 1.0)
+        _origin[-1] = 0
+        _diagonal[-1] = 0
+        
+    ref_dist_field_sitk = implicit_signed_distance(ref_mesh, _origin, _diagonal, _spacing)
+    pred_dist_field_sitk = implicit_signed_distance(pred_mesh, _origin, _diagonal, _spacing)
 
     # get hollowed masks
     sitk_and = sitk.AndImageFilter()
-    ref_hollowed_seg_sitk = sitk_and.Execute(
-        ref_dist_field_sitk < tau, ref_dist_field_sitk >= 0
-    )
-    pred_hollowed_seg_sitk = sitk_and.Execute(
-        pred_dist_field_sitk < tau, pred_dist_field_sitk >= 0
-    )
+    ref_hollowed_seg_sitk = sitk_and.Execute(ref_dist_field_sitk < tau, ref_dist_field_sitk >= 0)
+    pred_hollowed_seg_sitk = sitk_and.Execute(pred_dist_field_sitk < tau, pred_dist_field_sitk >= 0)
+    
     return sitk2np(ref_hollowed_seg_sitk) > 0, sitk2np(pred_hollowed_seg_sitk) > 0

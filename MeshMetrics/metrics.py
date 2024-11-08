@@ -1,15 +1,16 @@
 from functools import lru_cache
 import logging
-from typing import Any, Union
+from typing import Any, Tuple, Union
 
 import numpy as np
+import vtk
 from .mesh_utils import (
-    vtk_2D_meshing,
-    vtk_3D_meshing,
+    vtk_meshing,
     np2sitk,
     sitk_add_axis,
     vtk_centroids2contour_measurements,
     vtk_centroids2surface_measurements,
+    get_boundary_region,
 )
 
 is_mask_empty = lambda mask: not np.any(mask.astype(bool))
@@ -44,7 +45,7 @@ class DistanceMetrics:
                     if hasattr(cl_attr_fget, 'cache_clear'):
                         cl_attr_fget.cache_clear()
     @property
-    def ref_mask(self):
+    def ref_mask(self) -> np.ndarray:
         return self._ref_mask
 
     @ref_mask.setter
@@ -54,7 +55,7 @@ class DistanceMetrics:
         self._ref_mask = value.astype('uint8')
 
     @property
-    def pred_mask(self):
+    def pred_mask(self) -> np.ndarray:
         return self._pred_mask
 
     @pred_mask.setter
@@ -64,7 +65,7 @@ class DistanceMetrics:
         self._pred_mask = value.astype('uint8')
 
     @property
-    def spacing(self):
+    def spacing(self) -> tuple:
         return self._spacing
     
     @spacing.setter
@@ -78,20 +79,38 @@ class DistanceMetrics:
         
     @property
     @lru_cache
-    def ref_mesh(self):
-        ref_sitk_3D = np2sitk(self.ref_mask, spacing=self.spacing)
-        return vtk_3D_meshing(ref_sitk_3D)
+    def ref_mesh(self) -> vtk.vtkPolyData:
+        ref_sitk = np2sitk(self.ref_mask, spacing=self.spacing)
+        return vtk_meshing(ref_sitk)
         
     @property
     @lru_cache
-    def pred_mesh(self):
-        pred_sitk_3D = np2sitk(self.pred_mask, spacing=self.spacing)
-        return vtk_3D_meshing(pred_sitk_3D)
+    def pred_mesh(self) -> vtk.vtkPolyData:
+        pred_sitk = np2sitk(self.pred_mask, spacing=self.spacing)
+        return vtk_meshing(pred_sitk)
+    
+    @property
+    @lru_cache
+    def auxiliary_surface_meshes_for_2d(self) -> Tuple[vtk.vtkPolyData, vtk.vtkPolyData]:
+        r_b = np.array(self.ref_mesh.GetBounds())
+        p_b = np.array(self.pred_mesh.GetBounds())
+        ref_origin, ref_diagonal =r_b[::2], r_b[1::2]
+        pred_origin, pred_diagonal = p_b[::2], p_b[1::2]
+        
+        # find element-wise minimum and maximum
+        _origin = np.minimum(ref_origin, pred_origin)
+        _diagonal = np.maximum(ref_diagonal, pred_diagonal)
+        slice_thickness = np.linalg.norm(_diagonal - _origin)*2
+        
+        # create surface meshes (surface nets is no good, because signed distance map is not available)
+        ref_surface = vtk_meshing(sitk_add_axis(self.ref_mask, slice_thickness))
+        pred_surface = vtk_meshing(sitk_add_axis(self.pred_mask, slice_thickness))
+        return ref_surface, pred_surface
 
     # fmt: off
     @property
     @lru_cache
-    def distances(self) -> dict:
+    def distances(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if self.ref_mask.sum() == 0 or self.pred_mask.sum() == 0:
             return None
         elif self.n_dim == 2:
@@ -104,18 +123,9 @@ class DistanceMetrics:
         return d_ref2pred, b_ref, d_pred2ref, b_pred
     # fmt: on
 
-    def _distances_2D(self):
-        ref_sitk_2D = np2sitk(self.ref_mask, spacing=self.spacing)
-        pred_sitk_2D = np2sitk(self.pred_mask, spacing=self.spacing)
-
-        ref_contour = vtk_2D_meshing(ref_sitk_2D)
-        pred_contour = vtk_2D_meshing(pred_sitk_2D)
-
-        ref_sitk_3D = sitk_add_axis(ref_sitk_2D)
-        pred_sitk_3D = sitk_add_axis(pred_sitk_2D)
-
-        ref_surface = vtk_3D_meshing(ref_sitk_3D)
-        pred_surface = vtk_3D_meshing(pred_sitk_3D)
+    def _distances_2D(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        ref_contour, pred_contour = self.ref_mesh, self.pred_mesh
+        ref_surface, pred_surface = self.auxiliary_surface_meshes_for_2d
 
         return vtk_centroids2contour_measurements(
             ref_contour=ref_contour,
@@ -125,7 +135,7 @@ class DistanceMetrics:
             subdivide_iter=5,
         )
 
-    def _distances_3D(self):
+    def _distances_3D(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         return vtk_centroids2surface_measurements(self.ref_mesh, self.pred_mesh, subdivide_iter=1)
 
     @staticmethod
@@ -138,7 +148,7 @@ class DistanceMetrics:
         else:
             return np.inf
 
-    def hd(self, percentile=100):
+    def hd(self, percentile=100) -> float:
         assert isinstance(percentile, int), "percentile must be an integer"
         assert 0 <= percentile <= 100, "percentile must be between 0 and 100"
 
@@ -152,7 +162,7 @@ class DistanceMetrics:
             perc_d_pred2ref = self.perc_surface_dist(d_pred2ref, b_pred, percentile)
             return max(perc_d_ref2pred, perc_d_pred2ref)
 
-    def masd(self):
+    def masd(self) -> float:
         if self.ref_mask.sum() == 0 and self.pred_mask.sum() == 0:
             logging.warning("Both masks are empty")
             return np.nan
@@ -165,7 +175,7 @@ class DistanceMetrics:
             d_pred2ref = (d_pred2ref @ b_pred) / b_pred.sum()  # change to * operator
             return (d_ref2pred + d_pred2ref) / 2
 
-    def assd(self):
+    def assd(self) -> float:
         if self.ref_mask.sum() == 0 and self.pred_mask.sum() == 0:
             return np.nan
         elif self.ref_mask.sum() == 0 or self.pred_mask.sum() == 0:
@@ -182,7 +192,7 @@ class DistanceMetrics:
             value = num / denom
             return value
 
-    def nsd(self, tau):
+    def nsd(self, tau) -> float:
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau >= 0, "tolerance must be greater than or equal to zero"
 
@@ -204,11 +214,9 @@ class DistanceMetrics:
             # fmt: on
             return num / denom
 
-    def biou(self, tau):
+    def biou(self, tau) -> float:
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau > 0, "tolerance must be greater than or equal to zero"
-        
-        from .mesh_utils import get_hollow_meshes
 
         if self.ref_mask.sum() == 0 and self.pred_mask.sum() == 0:
             logging.warning("Both masks are empty")
@@ -218,9 +226,10 @@ class DistanceMetrics:
             return 0
         else:
             if self.n_dim == 2:
-                raise NotImplementedError("Boundary IoU is not yet implemented for 2D masks")
+                ref_surface, pred_surface = self.auxiliary_surface_meshes_for_2d
+                ref_hollow_np, pred_hollow_np = get_boundary_region(ref_surface, pred_surface, spacing=self.spacing, tau=tau)
             elif self.n_dim == 3:
-                ref_hollow_np, pred_hollow_np = get_hollow_meshes(self.ref_mesh, self.pred_mesh, spacing=self.spacing, tau=tau)
+                ref_hollow_np, pred_hollow_np = get_boundary_region(self.ref_mesh, self.pred_mesh, spacing=self.spacing, tau=tau)
 
             num = np.logical_and(ref_hollow_np, pred_hollow_np).sum()
             denom = np.logical_or(ref_hollow_np, pred_hollow_np).sum()
