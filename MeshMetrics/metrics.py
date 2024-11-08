@@ -103,8 +103,8 @@ class DistanceMetrics:
         slice_thickness = np.linalg.norm(_diagonal - _origin)*2
         
         # create surface meshes (surface nets is no good, because signed distance map is not available)
-        ref_surface = vtk_meshing(sitk_add_axis(self.ref_mask, slice_thickness))
-        pred_surface = vtk_meshing(sitk_add_axis(self.pred_mask, slice_thickness))
+        ref_surface = vtk_meshing(sitk_add_axis(np2sitk(self.ref_mask, spacing=self.spacing), slice_thickness))
+        pred_surface = vtk_meshing(sitk_add_axis(np2sitk(self.pred_mask, spacing=self.spacing), slice_thickness))
         return ref_surface, pred_surface
 
     # fmt: off
