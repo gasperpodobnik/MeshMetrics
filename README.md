@@ -1,8 +1,8 @@
 # MeshMetrics
-> Official implementation of `MeshMetrics` from [_Metrics Revolutions: Groundbreaking Insights into the Implementation of Metrics for Biomedical Image Segmentation_](https://arxiv.org/abs/2410.02630).
+> Official Python-based implementation of `MeshMetrics` from [_Metrics Revolutions: Groundbreaking Insights into the Implementation of Metrics for Biomedical Image Segmentation_](https://arxiv.org/abs/2410.02630).
 
 ## About
-`MeshMetrics` provides a precise, mesh-based implementation of critical metrics used in the evaluation of segmentation tasks. Quantitative performance metrics are fundamental for objective and reproducible segmentation assessments. Although *overlap-based* metrics - such as **Dice similarity coefficient** (DSC) and **intersection over union** (IoU) - are relatively straightforward to compute, *distance-based* metrics often lack uniform implementation across tools due to the complexity of distance calculations.
+`MeshMetrics` provides a precise, mesh-based implementation of critical metrics used in the evaluation of image segmentation tasks. Quantitative performance metrics are fundamental for objective and reproducible segmentation assessments. Although *overlap-based* metrics - such as **Dice similarity coefficient** (DSC) and **intersection over union** (IoU) - are relatively straightforward to compute, *distance-based* metrics often lack uniform implementation across tools due to the complexity of distance calculations.
 
 `MeshMetrics` includes accurate implementations of key distance-based metrics:
 - **Hausdorff Distance** (HD) with $p$-th **percentile variants** (HD<sub>p</sub>)
