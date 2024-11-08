@@ -24,9 +24,9 @@ def sitk2np(sitk_img: sitk.Image) -> np.ndarray:
     return np.swapaxes(sitk.GetArrayFromImage(sitk_img), 0, -1)
 
 
-def sitk_add_axis(img_sitk_2d):
+def sitk_add_axis(img_sitk_2d, thickness):
     ref_np_3d = sitk2np(img_sitk_2d)[..., np.newaxis]
-    spacing = (*img_sitk_2d.GetSpacing(), 1.0)
+    spacing = (*img_sitk_2d.GetSpacing(), thickness)
     img_sitk_3d = np2sitk(ref_np_3d, spacing=spacing)
     img_sitk_3d.SetOrigin((*img_sitk_2d.GetOrigin(), 0.0))
     return img_sitk_3d
@@ -347,9 +347,8 @@ def implicit_signed_distance(vtk_mesh, origin, diagonal, spacing):
         out[enum] = vtk_p2s_dist.FunctionValue(pt)
     out = out.reshape(pts.shape[:-1])
     
-    distance_field = np2sitk(out)
+    distance_field = np2sitk(out, spacing)
     distance_field.SetOrigin(origin)
-    distance_field.SetSpacing(spacing)
     return distance_field
 
 def get_boundary_region(
