@@ -176,33 +176,91 @@ def vtk_meshing(src_img: Union[str, Path, sitk.Image]):
     return mesh
 
 
+def vtkLinearSubdividePolyline(polydata, max_segment_length):
+    # Extract points and lines from the input polyline
+    og_points = polydata.GetPoints()
+    og_lines = polydata.GetLines()
+    
+    # Create new points and lines for the subdivided polyline
+    new_points = vtk.vtkPoints()
+    new_lines = vtk.vtkCellArray()
+    
+    og_lines.InitTraversal()
+    id_list = vtk.vtkIdList()
+
+    # Traverse each polyline segment
+    while og_lines.GetNextCell(id_list):
+        og_previous_point_id = None
+        for i in range(id_list.GetNumberOfIds()):
+            og_point_id = id_list.GetId(i)
+            current_point = np.array(og_points.GetPoint(og_point_id))
+
+            if og_previous_point_id is not None:
+                # Calculate distance and direction to previous point
+                previous_point = np.array(og_points.GetPoint(og_previous_point_id))
+                segment_vector = current_point - previous_point
+                segment_length = np.linalg.norm(segment_vector)
+                
+                # Determine the number of subdivisions needed
+                if segment_length > max_segment_length:
+                    num_subdivisions = int(np.ceil(segment_length / max_segment_length))
+                    for j in range(1, num_subdivisions):
+                        interpolated_point = previous_point + (j / num_subdivisions) * segment_vector
+                        new_point_id = new_points.InsertNextPoint(interpolated_point)
+                        new_lines.InsertNextCell(2)
+                        new_lines.InsertCellPoint(new_previous_point_id)
+                        new_lines.InsertCellPoint(new_point_id)
+                        new_previous_point_id = new_point_id
+                
+                # Add the last point of the current segment
+                new_point_id = new_points.InsertNextPoint(current_point)
+                new_lines.InsertNextCell(2)
+                new_lines.InsertCellPoint(new_previous_point_id)
+                new_lines.InsertCellPoint(new_point_id)
+            else:
+                # Add the first point of the polyline
+                new_point_id = new_points.InsertNextPoint(current_point)
+            
+            og_previous_point_id = og_point_id
+            new_previous_point_id = new_point_id
+
+    # Create new polydata with subdivided points and lines
+    subdivided_polydata = vtk.vtkPolyData()
+    subdivided_polydata.SetPoints(new_points)
+    subdivided_polydata.SetLines(new_lines)
+    
+    return subdivided_polydata
+
 def vtk_2D_centroid2surface_dist_length(
     pts_contour: vtk.vtkPolyData,
     surface_mesh: vtk.vtkPolyData,
-    subdivide_iter: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray]:
 
-    # compute distances and face areas between ref centroids and pred mesh
-    N_segments = pts_contour.GetNumberOfLines()
-    dists_pts2surface, segment_lengths = np.zeros(
-        N_segments * (subdivide_iter + 1)
-    ), np.zeros(N_segments * (subdivide_iter + 1))
-
+    lines = pts_contour.GetLines()
+    lines.InitTraversal()
+    id_list = vtk.vtkIdList()
+    
+    assert lines.GetMaxCellSize() == 2, "This function supports segment lines that have 2 points"
+    
+    N = lines.GetNumberOfCells()
+    dists_pts2surface, segment_lengths = np.zeros(N), np.zeros(N)
+    
     vtk_p2s_dist = vtk.vtkImplicitPolyDataDistance()
     vtk_p2s_dist.SetInput(surface_mesh)
+    
+    # Iterate over each polyline in vtkPolyData
     cnt = 0
-    for enum in range(N_segments):
-        pts = vtk_to_numpy(pts_contour.GetCell(enum).GetPoints().GetData())
-        assert pts.shape[0] == 2, "Only 2D segments are supported"
-        vec = pts[1] - pts[0]
-        ks = np.linspace(0, 1, 2 + subdivide_iter)
-        new_pts = np.vstack([pts[0] + k * vec for k in ks])
-        for enum2 in range(len(new_pts) - 1):
-            pt0 = new_pts[enum2]
-            pt1 = new_pts[enum2 + 1]
-            segment_lengths[cnt] = np.linalg.norm(pt0 - pt1)
-            dists_pts2surface[cnt] = abs(vtk_p2s_dist.FunctionValue((pt0 + pt1) / 2))
-            cnt += 1
+    while lines.GetNextCell(id_list):
+        point_id1 = id_list.GetId(0)
+        point_id2 = id_list.GetId(1)
+        
+        # Get the coordinates of the two points
+        pt0 = np.array(pts_contour.GetPoint(point_id1))
+        pt1 = np.array(pts_contour.GetPoint(point_id2))
+        
+        segment_lengths[cnt] = np.linalg.norm(pt0 - pt1)
+        dists_pts2surface[cnt] = abs(vtk_p2s_dist.FunctionValue((pt0+pt1)/2))
+        cnt += 1
     return dists_pts2surface, segment_lengths
 
 
@@ -217,23 +275,29 @@ def vtk_centroids2contour_measurements(
     ref_surface: vtk.vtkPolyData,
     pred_contour: vtk.vtkPolyData,
     pred_surface: vtk.vtkPolyData,
-    subdivide_iter: int = 0,
+    segment_len: float = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Calculate distances between centroids of triangles and surface represented by the mesh.
-    Function calculates in both directions and also returns the areas of surface elements (surfels).
+    """Calculate distances between centroids of polylines and the opposite polyline. 
+    Function calculates in both directions and also returns the length of line segments.
 
     Args:
-        ref_mesh (Union[str, Path, trimesh.Trimesh]): _description_
-        pred_mesh (Union[str, Path, trimesh.Trimesh]): _description_
+        ref_contour (vtk.vtkPolyData): _description_
+        ref_surface (vtk.vtkPolyData): _description_
+        pred_contour (vtk.vtkPolyData): _description_
+        pred_surface (vtk.vtkPolyData): _description_
+        segment_len (float, optional): _description_. Defaults to None.
 
     Returns:
-        tuple: (numpy vector of distances between ref mesh vertices and pred mesh surface, numpy vector of distances between pred mesh vertices and ref mesh surface)
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: (numpy vector of distances between ref mesh vertices and pred mesh surface, numpy vector of distances between pred mesh vertices and ref mesh surface)
     """
-
-    # fmt: off
-    dists_ref2pred, segment_lengths_ref = vtk_2D_centroid2surface_dist_length(ref_contour, pred_surface, subdivide_iter=subdivide_iter)
-    dists_pred2ref, segment_lengths_pred = vtk_2D_centroid2surface_dist_length(pred_contour, ref_surface, subdivide_iter=subdivide_iter)
     
+    if segment_len is not None:
+        ref_contour = vtkLinearSubdividePolyline(ref_contour, segment_len)
+        pred_contour = vtkLinearSubdividePolyline(pred_contour, segment_len)
+    
+    # fmt: off
+    dists_ref2pred, segment_lengths_ref = vtk_2D_centroid2surface_dist_length(ref_contour, pred_surface)
+    dists_pred2ref, segment_lengths_pred = vtk_2D_centroid2surface_dist_length(pred_contour, ref_surface)    
     # sort distances and boundary sizes
     dists_ref2pred, segment_lengths_ref = sort_dists_and_bsizes(dists_ref2pred, segment_lengths_ref)
     dists_pred2ref, segment_lengths_pred = sort_dists_and_bsizes(dists_pred2ref, segment_lengths_pred)
