@@ -92,6 +92,13 @@ class DistanceMetrics:
     @property
     @lru_cache
     def auxiliary_surface_meshes_for_2d(self) -> Tuple[vtk.vtkPolyData, vtk.vtkPolyData]:
+        """Note: Because vtk.vtkImplicitPolyDataDistance only works for 3D vtkPolyData (i.e. meshes), 
+        we use a trick to create a 3D surface mesh from a 2D segmentation by adding a third dimension, 
+        which represents the thickness. The thickness is set to the segmentation bounding box diagonal.
+
+        Returns:
+            Tuple[vtk.vtkPolyData, vtk.vtkPolyData]: _description_
+        """
         r_b = np.array(self.ref_mesh.GetBounds())
         p_b = np.array(self.pred_mesh.GetBounds())
         ref_origin, ref_diagonal =r_b[::2], r_b[1::2]
@@ -132,7 +139,7 @@ class DistanceMetrics:
             ref_surface=ref_surface,
             pred_contour=pred_contour,
             pred_surface=pred_surface,
-            subdivide_iter=5,
+            segment_len=min(self.spacing)/5,
         )
 
     def _distances_3D(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
