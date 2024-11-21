@@ -33,14 +33,22 @@ $ pip install MeshMetrics/
 ```
 
 ## Usage
+Simple usage example of `MeshMetrics` for 3D segmentation masks is shown below. See more examples in the [`examples.ipynb`](examples.ipynb) notebook.
+
 ```python
+from pathlib import Path
 from MeshMetrics import DistanceMetrics
 
+data_dir = Path("data")
 # initialize DistanceMetrics object
 dist_metrics = DistanceMetrics()
-# set input masks and spacing, masks should be boolean numpy arrays
-ref_mask, pred_mask, spacing = ..., ..., ...
-dist_metrics.set_input(ref_mask=ref_mask, pred_mask=pred_mask, spacing=spacing)
+
+# read binary segmentation masks
+ref_mask_sitk = sitk.ReadImage(data_dir / "example_3d_ref_mask.nii.gz")
+pred_mask_sitk = sitk.ReadImage(data_dir / "example_3d_pred_mask.nii.gz")
+
+# set input masks and spacing (only needed if both inputs are numpy arrays or vtk meshes)
+dist_metrics.set_input(ref=ref_mask_sitk, pred=pred_mask_sitk)
 
 # Hausdorff Distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
 hd100 = dist_metrics.hd()
