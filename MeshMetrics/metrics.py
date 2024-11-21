@@ -93,8 +93,6 @@ class DistanceMetrics:
         spacing: Union[tuple, list, np.ndarray],
     ):
         self.clear_cache()
-        assert isinstance(ref, np.ndarray), "ref must be a numpy array"
-        assert isinstance(pred, np.ndarray), "pred must be a numpy array"
         assert ref.ndim == pred.ndim == len(spacing), "masks and spacing must all have the same dimensionality"
         assert ref.shape == pred.shape, "masks must have the same shape"
 
@@ -155,9 +153,8 @@ class DistanceMetrics:
         """
         self.clear_cache()
         
-        assert isinstance(ref, vtk.vtkPolyData), "ref_mask must be a vtkPolyData object"
-        assert isinstance(pred, vtk.vtkPolyData), "pred_mask must be a vtkPolyData object"
-
+        assert not (ref is None and pred is None), "both input meshes cannot be None"
+        
         self.ref_vtk = ref
         self.pred_vtk = pred
         self.spacing = spacing
@@ -308,6 +305,9 @@ class DistanceMetrics:
             assert vtk_is_mesh_closed(value), "ref mesh must be a closed mesh"
             assert vtk_is_mesh_manifold(value), "ref mesh must be a manifold mesh"
             self._ref_vtk = value
+        elif value is None:
+            # empty mesh
+            self._ref_vtk = None
         else:
             raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
         
@@ -330,13 +330,24 @@ class DistanceMetrics:
             assert vtk_is_mesh_closed(value), "pred mesh must be a closed mesh"
             assert vtk_is_mesh_manifold(value), "pred mesh must be a manifold mesh"
             self._pred_vtk = value
+        elif value is None:
+            # empty mesh
+            self._pred_vtk = None
         else:
             raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
+        
+    @property
+    def ref_is_empty(self) -> bool:
+        return self.ref_vtk is None
+
+    @property
+    def pred_is_empty(self) -> bool:
+        return self.pred_vtk is None
 
     @property
     @lru_cache
     def distances(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        if self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
+        if self.ref_is_empty or self.pred_is_empty:
             return None
         elif self.n_dim == 2:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self._distances_2D()
@@ -373,9 +384,9 @@ class DistanceMetrics:
         assert isinstance(percentile, int), "percentile must be an integer"
         assert 0 <= percentile <= 100, "percentile must be between 0 and 100"
 
-        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
+        if self.ref_is_empty and self.pred_is_empty:
             return np.nan
-        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
+        elif self.ref_is_empty or self.pred_is_empty:
             return np.inf
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
@@ -384,10 +395,10 @@ class DistanceMetrics:
             return max(perc_d_ref2pred, perc_d_pred2ref)
 
     def masd(self) -> float:
-        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
+        if self.ref_is_empty and self.pred_is_empty:
             logging.warning("Both masks are empty")
             return np.nan
-        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
+        elif self.ref_is_empty or self.pred_is_empty:
             logging.warning("One of the masks is empty")
             return np.inf
         else:
@@ -397,9 +408,9 @@ class DistanceMetrics:
             return (d_ref2pred + d_pred2ref) / 2
 
     def assd(self) -> float:
-        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
+        if self.ref_is_empty and self.pred_is_empty:
             return np.nan
-        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
+        elif self.ref_is_empty or self.pred_is_empty:
             logging.warning("One of the masks is empty")
             return np.inf
         else:
@@ -415,10 +426,10 @@ class DistanceMetrics:
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau >= 0, "tolerance must be greater than or equal to zero"
 
-        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
+        if self.ref_is_empty and self.pred_is_empty:
             logging.warning("Both masks are empty")
             return np.nan
-        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
+        elif self.ref_is_empty or self.pred_is_empty:
             logging.warning("One of the masks is empty")
             return 0
         else:
@@ -435,10 +446,10 @@ class DistanceMetrics:
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau > 0, "tolerance must be greater than or equal to zero"
 
-        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
+        if self.ref_is_empty and self.pred_is_empty:
             logging.warning("Both masks are empty")
             return np.nan
-        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
+        elif self.ref_is_empty or self.pred_is_empty:
             logging.warning("One of the masks is empty")
             return 0
         else:
