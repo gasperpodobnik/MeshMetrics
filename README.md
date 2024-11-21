@@ -69,7 +69,7 @@ biou2 = dist_metrics.biou(tau=2)
 
 # ----------------------------------------
 # If using `numpy.ndarray` representations, please note that the spacing must be
-# reordered when converting a `SimpleITK.Image` object to a `numpy.ndarray`.
+# reordered when converting a `SimpleITK.Image` object to a `numpy.ndarray`
 ref_np = sitk.GetArrayFromImage(ref_sitk).astype(bool)
 pred_np = sitk.GetArrayFromImage(pred_sitk).astype(bool)
 
