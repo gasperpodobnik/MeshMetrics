@@ -1,6 +1,6 @@
 from functools import lru_cache
 import logging
-from typing import Any, Tuple, Union
+from typing import Tuple, Union
 
 import numpy as np
 import vtk
@@ -88,8 +88,8 @@ class DistanceMetrics:
             
     def _set_input_numpy(
         self,
-        ref: np.ndarray[Any, np.dtype[np.bool_]],
-        pred: np.ndarray[Any, np.dtype[np.bool_]],
+        ref: np.ndarray,
+        pred: np.ndarray,
         spacing: Union[tuple, list, np.ndarray],
     ):
         self.clear_cache()
