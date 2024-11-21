@@ -4,38 +4,185 @@ from typing import Any, Tuple, Union
 
 import numpy as np
 import vtk
-from .mesh_utils import (
+import SimpleITK as sitk
+from .utils import (
     vtk_meshing,
     np2sitk,
-    sitk_add_axis,
+    sitk2np,
     vtk_centroids2contour_measurements,
     vtk_centroids2surface_measurements,
-    get_boundary_region,
+    get_hollow_mask,
+    vtk_voxelizer,
+    vtk_is_mesh_closed,
+    vtk_is_mesh_manifold,
+    vtk_meshes_bbox_sitk_image
 )
 
 is_mask_empty = lambda mask: not np.any(mask.astype(bool))
 
-
 class DistanceMetrics:
+    def __init__(self):
+        self._ref_np = None
+        self._pred_np = None
+        self._spacing = None
+        self._ref_sitk = None
+        self._pred_sitk = None
+        self._ref_vtk = None
+        self._pred_vtk = None
+        self._ref_vtk = None
+        self._pred_vtk = None
+
     def set_input(
         self,
-        ref_mask: np.ndarray[Any, np.dtype[np.bool_]],
-        pred_mask: np.ndarray[Any, np.dtype[np.bool_]],
+        ref: Union[np.ndarray, sitk.Image, vtk.vtkPolyData],
+        pred: Union[np.ndarray, sitk.Image, vtk.vtkPolyData],
+        spacing: Union[tuple, list, np.ndarray] = None,
+    ):
+        """
+        General input setter method that automatically detects the input type.
+        Note: 
+            - If `ref` is numpy array, the `pred` must also be numpy array and vice versa. Also spacing must be set.
+            This is to avoid potential issues with different spatial positions of segmentation masks 
+            (i.e. mesh in world coordinate system and mask in local coordinate system).
+            
+            - If both `ref` and `pred` are VTK polydata, the `spacing` must be set.
+            This is because some calculations are performed in grid space (see BIoU).
+            
+            - If both `ref` and `pred` are SimpleITK images, the spacing is automatically set from the images and should not be provided.
+            
+            - For all other combinations (`ref` is SimpleITK image and `pred` is VTK polydata or vice versa),
+            the spacing will be inferred from the SimpleITK image input and should not be provided. 
+            The input mesh should be in world coordinates.
+        """
+        self.clear_cache()
+        
+        # both np.ndarray
+        if isinstance(ref, np.ndarray) or isinstance(pred, np.ndarray):
+            assert isinstance(ref, np.ndarray) and isinstance(pred, np.ndarray), "if `ref` is numpy array, pred must also be a numpy array and vice versa"
+            assert spacing is not None, "spacing must be provided if either `ref` or `pred` are numpy arrays"
+            self._set_input_numpy(ref, pred, spacing)
+        # both sitk.Image
+        elif isinstance(ref, sitk.Image) and isinstance(pred, sitk.Image):
+            assert spacing is None, "spacing must not be provided if both `ref` and `pred` are SimpleITK images"
+            self.spacing = ref.GetSpacing()
+            self._set_input_SimpleITK(ref, pred)
+        # both vtk.vtkPolyData
+        elif isinstance(ref, vtk.vtkPolyData) and isinstance(pred, vtk.vtkPolyData):
+            assert spacing is not None, "spacing must be provided if both `ref` and `pred` are vtkPolyData"
+            self._set_input_vtk(ref, pred, spacing)
+        # one is sitk.Image and the other is vtk.vtkPolyData
+        elif isinstance(ref, (sitk.Image, vtk.vtkPolyData)) and isinstance(pred, (sitk.Image, vtk.vtkPolyData)):
+            assert spacing is None, "spacing will be inferred from the SimpleITK image input"
+            if isinstance(ref, sitk.Image):
+                self.ref_sitk = ref
+                spacing = ref.GetSpacing()
+                ref = vtk_meshing(ref)
+            else:
+                self.pred_sitk = pred
+                spacing = pred.GetSpacing()
+                pred = vtk_meshing(pred)
+            self._set_input_vtk(ref, pred, spacing)
+        else:
+            assert isinstance(pred, (sitk.Image, vtk.vtkPolyData)), "if `ref` is SimpleITK image, `pred` must be SimpleITK image or vtkPolyData"
+            raise ValueError("ref must be a numpy array, SimpleITK image or vtkPolyData")
+            
+    def _set_input_numpy(
+        self,
+        ref: np.ndarray[Any, np.dtype[np.bool_]],
+        pred: np.ndarray[Any, np.dtype[np.bool_]],
         spacing: Union[tuple, list, np.ndarray],
     ):
         self.clear_cache()
-        self.ref_mask = ref_mask
-        self.pred_mask = pred_mask
+        assert isinstance(ref, np.ndarray), "ref must be a numpy array"
+        assert isinstance(pred, np.ndarray), "pred must be a numpy array"
+        assert ref.ndim == pred.ndim == len(spacing), "masks and spacing must all have the same dimensionality"
+        assert ref.shape == pred.shape, "masks must have the same shape"
+
+        self.ref_np = ref
+        self.pred_np = pred
         self.spacing = spacing
 
-        # fmt: off
-        assert self.ref_mask.ndim == self.pred_mask.ndim == len(spacing), "masks and spacing must all have the same dimensionality"
-        assert self.ref_mask.shape == self.pred_mask.shape, "masks must have the same shape"
-        # fmt: on
+        ## set other representations
+        self.ref_sitk = self.ref_np
+        self.pred_sitk = self.pred_np
+        self.ref_vtk = self.ref_np
+        self.pred_vtk = self.pred_np
 
-        self.n_dim = len(spacing)
+    def _set_input_SimpleITK(
+        self,
+        ref: sitk.Image,
+        pred: sitk.Image,
+    ):
+        self.clear_cache()
+        assert isinstance(ref, sitk.Image), "ref must be a SimpleITK image"
+        assert isinstance(pred, sitk.Image), "pred must be a SimpleITK image"
+        assert ref.GetOrigin() == pred.GetOrigin(), "input mask origin must be the same"
+        assert ref.GetSpacing() == pred.GetSpacing(), "input mask spacing must be the same"
+        assert ref.GetSize() == pred.GetSize(), "input mask size must be the same"
+        assert ref.GetDirection() == pred.GetDirection(), "input mask direction must be the same"
+        
+        self.ref_sitk = ref
+        self.pred_sitk = pred
+        
+        ## set other representations
+        self.ref_np = self.ref_sitk
+        self.pred_np = self.pred_sitk
+        self.ref_vtk = self.ref_sitk
+        self.pred_vtk = self.pred_sitk
+
+    def _set_input_vtk(
+        self,
+        ref: vtk.vtkPolyData,
+        pred: vtk.vtkPolyData,
+        spacing: Union[tuple, list, np.ndarray],
+    ):
+        """
+        Set the input VTK polydata for reference and prediction meshes along with the spacing.
+        Parameters
+        ----------
+        ref : vtk.vtkPolyData
+            The reference mesh as a VTK polydata object.
+        pred : vtk.vtkPolyData
+            The prediction mesh as a VTK polydata object.
+        spacing : Union[tuple, list, np.ndarray]
+            The spacing is required, because some calculations are performed in grid space (see BIoU).
+        Raises
+        ------
+        AssertionError
+            If `ref` or `pred` are not instances of vtk.vtkPolyData.
+            If `ref` or `pred` are not closed meshes.
+            If `ref` or `pred` are not manifold meshes.
+        """
+        self.clear_cache()
+        
+        assert isinstance(ref, vtk.vtkPolyData), "ref_mask must be a vtkPolyData object"
+        assert isinstance(pred, vtk.vtkPolyData), "pred_mask must be a vtkPolyData object"
+
+        self.ref_vtk = ref
+        self.pred_vtk = pred
+        self.spacing = spacing
+
+        ## set other representations
+        # create a meta image SimpleITK that encompasses both masks
+        meta_sitk = vtk_meshes_bbox_sitk_image(
+            self.ref_vtk, 
+            self.pred_vtk, 
+            spacing=self.spacing,
+            tolerance=5*np.array(self.spacing), 
+        )
+        
+        self.ref_sitk = vtk_voxelizer(self.ref_vtk, meta_sitk)
+        self.pred_sitk = vtk_voxelizer(self.pred_vtk, meta_sitk)
+        
+        self.ref_np = self.ref_sitk
+        self.pred_np = self.pred_sitk
+
+    @property
+    def n_dim(self):
+        return len(self.spacing)
 
     def clear_cache(self):
+        self.__init__()
         cl = self.__class__
         for attr in dir(cl):
             if hasattr(cl, attr):
@@ -45,24 +192,42 @@ class DistanceMetrics:
                     if hasattr(cl_attr_fget, 'cache_clear'):
                         cl_attr_fget.cache_clear()
     @property
-    def ref_mask(self) -> np.ndarray:
-        return self._ref_mask
+    def ref_np(self) -> np.ndarray:
+        return self._ref_np
 
-    @ref_mask.setter
-    def ref_mask(self, value):
-        assert isinstance(value, np.ndarray), "mask must be a numpy array"
-        assert value.dtype == bool, "mask must be a boolean array"
-        self._ref_mask = value.astype('uint8')
+    @ref_np.setter
+    def ref_np(self, value: np.ndarray):
+        if self._ref_np is not None:
+            pass
+        elif isinstance(value, np.ndarray):
+            assert value.dtype == bool, "mask must be a boolean array"
+            self._ref_np = value.astype('uint8')
+        elif isinstance(value, sitk.Image):
+            assert id(value) == id(self.ref_sitk), "mask must be the same object as the `ref_sitk`"
+            self._ref_np = sitk2np(value)
+        elif isinstance(value, vtk.vtkPolyData):
+            raise NotImplementedError("Conversion from vtkPolyData to numpy array is not implemented")
+        else:
+            raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
 
     @property
-    def pred_mask(self) -> np.ndarray:
-        return self._pred_mask
-
-    @pred_mask.setter
-    def pred_mask(self, value):
-        assert isinstance(value, np.ndarray), "mask must be a numpy array"
-        assert value.dtype == bool, "mask must be a boolean array"
-        self._pred_mask = value.astype('uint8')
+    def pred_np(self) -> np.ndarray:
+        return self._pred_np
+    
+    @pred_np.setter
+    def pred_np(self, value: np.ndarray):
+        if self._pred_np is not None:
+            pass
+        elif isinstance(value, np.ndarray):
+            assert value.dtype == bool, "mask must be a boolean array"
+            self._pred_np = value.astype('uint8')
+        elif isinstance(value, sitk.Image):
+            assert id(value) == id(self.pred_sitk), "mask must be the same object as the `pred_sitk`"
+            self._pred_np = sitk2np(value)
+        elif isinstance(value, vtk.vtkPolyData):
+            raise NotImplementedError("Conversion from vtkPolyData to numpy array is not implemented")
+        else:
+            raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
 
     @property
     def spacing(self) -> tuple:
@@ -70,55 +235,108 @@ class DistanceMetrics:
     
     @spacing.setter
     def spacing(self, value):
-        assert isinstance(
-            value, (list, tuple, np.ndarray)
-        ), "spacing must be a list, tuple or numpy array"
-        assert len(value) in [2, 3], "only 2D or 3D spacing is supported"
-        self._spacing = tuple(value)
-        
-        
-    @property
-    @lru_cache
-    def ref_mesh(self) -> vtk.vtkPolyData:
-        ref_sitk = np2sitk(self.ref_mask, spacing=self.spacing)
-        return vtk_meshing(ref_sitk)
-        
-    @property
-    @lru_cache
-    def pred_mesh(self) -> vtk.vtkPolyData:
-        pred_sitk = np2sitk(self.pred_mask, spacing=self.spacing)
-        return vtk_meshing(pred_sitk)
-    
-    @property
-    @lru_cache
-    def auxiliary_surface_meshes_for_2d(self) -> Tuple[vtk.vtkPolyData, vtk.vtkPolyData]:
-        """Note: Because vtk.vtkImplicitPolyDataDistance only works for 3D vtkPolyData (i.e. meshes), 
-        we use a trick to create a 3D surface mesh from a 2D segmentation by adding a third dimension, 
-        which represents the thickness. The thickness is set to the segmentation bounding box diagonal.
+        if self._spacing is not None:
+            assert value == self.spacing, "spacing must be the same as the previously set spacing"
+        else:
+            assert isinstance(
+                value, (list, tuple, np.ndarray)
+            ), "spacing must be a list, tuple or numpy array"
+            assert len(value) in [2, 3], "only 2D or 3D calculations are supported"
+            self._spacing = tuple(value)
 
-        Returns:
-            Tuple[vtk.vtkPolyData, vtk.vtkPolyData]: _description_
-        """
-        r_b = np.array(self.ref_mesh.GetBounds())
-        p_b = np.array(self.pred_mesh.GetBounds())
-        ref_origin, ref_diagonal =r_b[::2], r_b[1::2]
-        pred_origin, pred_diagonal = p_b[::2], p_b[1::2]
+    @property
+    def ref_sitk(self) -> sitk.Image:
+        return self._ref_sitk
         
-        # find element-wise minimum and maximum
-        _origin = np.minimum(ref_origin, pred_origin)
-        _diagonal = np.maximum(ref_diagonal, pred_diagonal)
-        slice_thickness = np.linalg.norm(_diagonal - _origin)*2
+    @ref_sitk.setter
+    def ref_sitk(self, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
+        if self._ref_sitk is not None:
+            pass
+        elif isinstance(value, np.ndarray):
+            assert id(value) == id(self.ref_np), "mask must be the same object as the `ref_np`"
+            self._ref_sitk = np2sitk(value, spacing=self.spacing)
+        elif isinstance(value, sitk.Image):
+            assert value.GetPixelID() == sitk.sitkUInt8, "mask must be a sitk image with pixel type UInt8"
+            labelimfilter = sitk.LabelShapeStatisticsImageFilter()
+            labelimfilter.Execute(value)
+            assert labelimfilter.GetNumberOfLabels() < 2, "mask must include background and up to one foreground class"
+            self._ref_sitk = value
+            self.spacing = value.GetSpacing()
+        elif isinstance(value, vtk.vtkPolyData):
+            raise NotImplementedError("Conversion from vtkPolyData to SimpleITK image needs to happen in the input setter")
+        else:
+            raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
         
-        # create surface meshes (surface nets is no good, because signed distance map is not available)
-        ref_surface = vtk_meshing(sitk_add_axis(np2sitk(self.ref_mask, spacing=self.spacing), slice_thickness))
-        pred_surface = vtk_meshing(sitk_add_axis(np2sitk(self.pred_mask, spacing=self.spacing), slice_thickness))
-        return ref_surface, pred_surface
+    @property
+    def pred_sitk(self) -> sitk.Image:
+        return self._pred_sitk
+        
+    @pred_sitk.setter
+    def pred_sitk(self, value: Union[sitk.Image, np.ndarray, vtk.vtkPolyData]):
+        if self._pred_sitk is not None:
+            pass
+        elif isinstance(value, np.ndarray):
+            assert id(value) == id(self.pred_np), "mask must be the same object as the `pred_np`"
+            self._pred_sitk = np2sitk(value, spacing=self.spacing)
+        elif isinstance(value, sitk.Image):
+            assert value.GetPixelID() == sitk.sitkUInt8, "mask must be a sitk image with pixel type UInt8"
+            labelimfilter = sitk.LabelShapeStatisticsImageFilter()
+            labelimfilter.Execute(value)
+            assert labelimfilter.GetNumberOfLabels() < 2, "mask must include background and up to one foreground class"
+            self._pred_sitk = value
+        elif isinstance(value, vtk.vtkPolyData):
+            raise NotImplementedError("Conversion from vtkPolyData to SimpleITK image needs to happen in the input setter")
+        else:
+            raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
 
-    # fmt: off
+    @property
+    def ref_vtk(self) -> sitk.Image:
+        return self._ref_vtk
+        
+    @ref_vtk.setter
+    def ref_vtk(self, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
+        if self._ref_vtk is not None:
+            pass
+        elif isinstance(value, np.ndarray):
+            assert id(value) == id(self.ref_np), "mask must be the same object as the `ref_np`"
+            assert hasattr(self, "ref_sitk"), "ref_sitk must be set before setting the mesh"
+            self._ref_vtk = vtk_meshing(self.ref_sitk)
+        elif isinstance(value, sitk.Image):
+            assert id(value) == id(self.ref_sitk), "mask must be the same object as the `ref_sitk`"
+            self._ref_vtk = vtk_meshing(self.ref_sitk)
+        elif isinstance(value, vtk.vtkPolyData):
+            assert vtk_is_mesh_closed(value), "ref mesh must be a closed mesh"
+            assert vtk_is_mesh_manifold(value), "ref mesh must be a manifold mesh"
+            self._ref_vtk = value
+        else:
+            raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
+        
+    @property
+    def pred_vtk(self) -> sitk.Image:
+        return self._pred_vtk
+        
+    @pred_vtk.setter
+    def pred_vtk(self, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
+        if self._pred_vtk is not None:
+            pass
+        elif isinstance(value, np.ndarray):
+            assert id(value) == id(self.pred_np), "mask must be the same object as the `pred_np`"
+            assert hasattr(self, "pred_sitk"), "pred_sitk must be set before setting the mesh"
+            self._pred_vtk = vtk_meshing(self.pred_sitk)
+        elif isinstance(value, sitk.Image):
+            assert id(value) == id(self.pred_sitk), "mask must be the same object as the `pred_sitk`"
+            self._pred_vtk = vtk_meshing(self.pred_sitk)
+        elif isinstance(value, vtk.vtkPolyData):
+            assert vtk_is_mesh_closed(value), "pred mesh must be a closed mesh"
+            assert vtk_is_mesh_manifold(value), "pred mesh must be a manifold mesh"
+            self._pred_vtk = value
+        else:
+            raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
+
     @property
     @lru_cache
     def distances(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        if self.ref_mask.sum() == 0 or self.pred_mask.sum() == 0:
+        if self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
             return None
         elif self.n_dim == 2:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self._distances_2D()
@@ -128,22 +346,18 @@ class DistanceMetrics:
             raise ValueError("Only 2D and 3D masks are supported")
 
         return d_ref2pred, b_ref, d_pred2ref, b_pred
-    # fmt: on
 
     def _distances_2D(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        ref_contour, pred_contour = self.ref_mesh, self.pred_mesh
-        ref_surface, pred_surface = self.auxiliary_surface_meshes_for_2d
+        ref_contour, pred_contour = self.ref_vtk, self.pred_vtk
 
         return vtk_centroids2contour_measurements(
             ref_contour=ref_contour,
-            ref_surface=ref_surface,
             pred_contour=pred_contour,
-            pred_surface=pred_surface,
-            segment_len=min(self.spacing)/5,
+            subdivide_iter=5,
         )
 
     def _distances_3D(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        return vtk_centroids2surface_measurements(self.ref_mesh, self.pred_mesh, subdivide_iter=1)
+        return vtk_centroids2surface_measurements(self.ref_vtk, self.pred_vtk, subdivide_iter=1)
 
     @staticmethod
     def perc_surface_dist(dists, b_sizes, perc) -> float:
@@ -159,9 +373,9 @@ class DistanceMetrics:
         assert isinstance(percentile, int), "percentile must be an integer"
         assert 0 <= percentile <= 100, "percentile must be between 0 and 100"
 
-        if self.ref_mask.sum() == 0 and self.pred_mask.sum() == 0:
+        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
             return np.nan
-        elif self.ref_mask.sum() == 0 or self.pred_mask.sum() == 0:
+        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
             return np.inf
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
@@ -170,10 +384,10 @@ class DistanceMetrics:
             return max(perc_d_ref2pred, perc_d_pred2ref)
 
     def masd(self) -> float:
-        if self.ref_mask.sum() == 0 and self.pred_mask.sum() == 0:
+        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
             logging.warning("Both masks are empty")
             return np.nan
-        elif self.ref_mask.sum() == 0 or self.pred_mask.sum() == 0:
+        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
             logging.warning("One of the masks is empty")
             return np.inf
         else:
@@ -183,9 +397,9 @@ class DistanceMetrics:
             return (d_ref2pred + d_pred2ref) / 2
 
     def assd(self) -> float:
-        if self.ref_mask.sum() == 0 and self.pred_mask.sum() == 0:
+        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
             return np.nan
-        elif self.ref_mask.sum() == 0 or self.pred_mask.sum() == 0:
+        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
             logging.warning("One of the masks is empty")
             return np.inf
         else:
@@ -193,9 +407,7 @@ class DistanceMetrics:
             num = d_ref2pred @ b_ref + d_pred2ref @ b_pred
             denom = b_ref.sum() + b_pred.sum()
             if denom == 0:
-                # fmt: off
                 raise ValueError("sum of boundary sizes is zero, something weird is going on")
-            # fmt: on
             value = num / denom
             return value
 
@@ -203,10 +415,10 @@ class DistanceMetrics:
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau >= 0, "tolerance must be greater than or equal to zero"
 
-        if self.ref_mask.sum() == 0 and self.pred_mask.sum() == 0:
+        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
             logging.warning("Both masks are empty")
             return np.nan
-        elif self.ref_mask.sum() == 0 or self.pred_mask.sum() == 0:
+        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
             logging.warning("One of the masks is empty")
             return 0
         else:
@@ -216,28 +428,26 @@ class DistanceMetrics:
             num = overlap_ref + overlap_pred
             denom = b_ref.sum() + b_pred.sum()
             if denom == 0:
-                # fmt: off
                 raise ValueError("sum of boundary sizes is zero, something weird is going on")
-            # fmt: on
             return num / denom
 
     def biou(self, tau) -> float:
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau > 0, "tolerance must be greater than or equal to zero"
 
-        if self.ref_mask.sum() == 0 and self.pred_mask.sum() == 0:
+        if self.ref_np.sum() == 0 and self.pred_np.sum() == 0:
             logging.warning("Both masks are empty")
             return np.nan
-        elif self.ref_mask.sum() == 0 or self.pred_mask.sum() == 0:
+        elif self.ref_np.sum() == 0 or self.pred_np.sum() == 0:
             logging.warning("One of the masks is empty")
             return 0
         else:
-            if self.n_dim == 2:
-                ref_surface, pred_surface = self.auxiliary_surface_meshes_for_2d
-                ref_hollow_np, pred_hollow_np = get_boundary_region(ref_surface, pred_surface, spacing=self.spacing, tau=tau)
-            elif self.n_dim == 3:
-                ref_hollow_np, pred_hollow_np = get_boundary_region(self.ref_mesh, self.pred_mesh, spacing=self.spacing, tau=tau)
-
+            ref_hollow_np, pred_hollow_np = get_hollow_mask(
+                ref_mask=self.ref_sitk, 
+                pred_mask=self.pred_sitk,
+                tau=tau
+            )
+            
             num = np.logical_and(ref_hollow_np, pred_hollow_np).sum()
             denom = np.logical_or(ref_hollow_np, pred_hollow_np).sum()
 
