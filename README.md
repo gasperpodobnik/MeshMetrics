@@ -40,6 +40,7 @@ See [`examples.ipynb`](examples.ipynb) notebook for more examples.
 
 ```python
 from pathlib import Path
+import SimpleITK as sitk
 from MeshMetrics import DistanceMetrics
 
 data_dir = Path("data")
@@ -47,11 +48,11 @@ data_dir = Path("data")
 dist_metrics = DistanceMetrics()
 
 # read binary segmentation masks
-ref_mask_sitk = sitk.ReadImage(data_dir / "example_3d_ref_mask.nii.gz")
-pred_mask_sitk = sitk.ReadImage(data_dir / "example_3d_pred_mask.nii.gz")
+ref_sitk = sitk.ReadImage(data_dir / "example_3d_ref_mask.nii.gz")
+pred_sitk = sitk.ReadImage(data_dir / "example_3d_pred_mask.nii.gz")
 
 # set input masks and spacing (only needed if both inputs are numpy arrays or vtk meshes)
-dist_metrics.set_input(ref=ref_mask_sitk, pred=pred_mask_sitk)
+dist_metrics.set_input(ref=ref_sitk, pred=pred_sitk)
 
 # Hausdorff Distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
 hd100 = dist_metrics.hd()
@@ -69,18 +70,15 @@ biou2 = dist_metrics.biou(tau=2)
 # ----------------------------------------
 # If using `numpy.ndarray` representations, please note that the spacing must be
 # reordered when converting a `SimpleITK.Image` object to a `numpy.ndarray`.
-import SimpleITK as sitk
-ref_path, pred_path = ..., ...
-ref_sitk, pred_sitk = sitk.ReadImage(ref_path), sitk.ReadImage(pred_path)
-ref_mask = sitk.GetArrayFromImage(ref_sitk).astype(bool)
-pred_mask = sitk.GetArrayFromImage(pred_sitk).astype(bool)
 
-assert ref_sitk.GetSize() == pred_sitk.GetSize()
-assert ref_sitk.GetSpacing() == pred_sitk.GetSpacing()
-assert ref_sitk.GetOrigin() == pred_sitk.GetOrigin()
-assert ref_sitk.GetDirection() == pred_sitk.GetDirection()
+# convert to numpy
+ref_np = sitk.GetArrayFromImage(ref_sitk).astype(bool)
+pred_np = sitk.GetArrayFromImage(pred_sitk).astype(bool)
 
 # spacing should resemble the order of numpy array axes
-spacing = ref_sitk.GetSpacing()[::-1]
+spacing = ref_np.GetSpacing()[::-1]
+
+dist_metrics = DistanceMetrics()
+dist_metrics.set_input(ref=ref_np, pred=pred_np, spacing=spacing)
 # ... follow the same procedure as before
 ```
