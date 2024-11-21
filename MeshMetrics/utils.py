@@ -125,7 +125,7 @@ def vtk_2D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
     assert n_dim == 2, "Only 2D images are supported for marching squares"
 
     if sitk.GetArrayFromImage(src_img).sum() == 0:
-        return None
+        return vtk.vtkPolyData()
 
     # pad to avoid potential open boundary related issues
     src_img = sitk.ConstantPad(src_img, (1, 1), (1, 1), 0)
@@ -152,7 +152,7 @@ def vtk_3D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
     src_img = sitk.ConstantPad(src_img, (1, 1, 1), (1, 1, 1), 0)
 
     if sitk.GetArrayFromImage(src_img).sum() == 0:
-        return None
+        return vtk.vtkPolyData()
     vtkImage = sitk2vtk(src_img > 0)
 
     # segmentation --> polygonal data:
@@ -649,6 +649,10 @@ def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
     assert isinstance(mesh_vtk, vtk.vtkPolyData), "Mesh must be vtkPolyData"
     assert isinstance(meta_sitk, sitk.Image), "Segmentation must be SimpleITK image"
     
+    # check for empty mesh or empty image
+    if mesh_vtk is None or np.prod(meta_sitk.GetSize()) == 0:
+        return sitk.Image()
+    
     vtkImage = sitk2vtk(meta_sitk)
     
     ndim = meta_sitk.GetDimension()
@@ -671,17 +675,16 @@ def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
         vtk_transform.Update()
         mesh_vtk = vtk_transform.GetOutput()
     
-    dst_extent = np.array(vtkImage.GetExtent())
-    src_spacing = np.array(vtkImage.GetSpacing())
-    dst_spacing = src_spacing.copy()
-    dst_origin = vtkImage.GetOrigin()
+    spacing = vtkImage.GetSpacing()
+    origin = vtkImage.GetOrigin()
+    extent = vtkImage.GetExtent()
 
     # polygonal data --> image stencil:
     poly2stenc = vtk.vtkPolyDataToImageStencil()
     poly2stenc.SetInputData(mesh_vtk)
-    poly2stenc.SetOutputOrigin(dst_origin)
-    poly2stenc.SetOutputSpacing(dst_spacing)
-    poly2stenc.SetOutputWholeExtent(dst_extent)
+    poly2stenc.SetOutputOrigin(origin)
+    poly2stenc.SetOutputSpacing(spacing)
+    poly2stenc.SetOutputWholeExtent(extent)
     poly2stenc.Update()
     stenc = poly2stenc.GetOutput()
 
@@ -700,18 +703,24 @@ def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
 
     return voxelized_sitk
 
-def vtk_meshes_bbox_sitk_image(mesh1: vtk.vtkPolyData, mesh2: vtk.vtkPolyData, spacing: tuple, tolerance: tuple=None) -> sitk.Image:
+def get_mesh_bounds(mesh: vtk.vtkPolyData) -> np.ndarray:
+    bounds = np.array(mesh.GetBounds())
+    if np.allclose(bounds, (1.0, -1.0, 1.0, -1.0, 1.0, -1.0)):
+        bounds[:] = np.nan
+    return bounds
+
+def vtk_meshes_bbox_sitk_image(mesh1: vtk.vtkPolyData, mesh2: vtk.vtkPolyData, spacing: tuple, tolerance: tuple=None) -> sitk.Image:    
     ndim = len(spacing)
     
     # create a meta image SimpleITK that encompasses both masks
-    ref_b = np.array(mesh1.GetBounds())
-    pred_b = np.array(mesh2.GetBounds())
+    ref_b = get_mesh_bounds(mesh1)
+    pred_b = get_mesh_bounds(mesh2)
     ref_origin, ref_diagonal =ref_b[::2], ref_b[1::2]
     pred_origin, pred_diagonal = pred_b[::2], pred_b[1::2]
     
     # find element-wise minimum and maximum
-    origin = np.minimum(ref_origin, pred_origin)[:ndim]
-    diagonal = np.maximum(ref_diagonal, pred_diagonal)[:ndim]
+    origin = np.nanmin((ref_origin, pred_origin), axis=0)[:ndim]
+    diagonal = np.nanmax((ref_diagonal, pred_diagonal), axis=0)[:ndim]
     
     if tolerance is not None:
         tolerance = np.array(tolerance)

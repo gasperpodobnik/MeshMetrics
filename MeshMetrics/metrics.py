@@ -153,8 +153,6 @@ class DistanceMetrics:
         """
         self.clear_cache()
         
-        assert not (ref is None and pred is None), "both input meshes cannot be None"
-        
         self.ref_vtk = ref
         self.pred_vtk = pred
         self.spacing = spacing
@@ -305,9 +303,6 @@ class DistanceMetrics:
             assert vtk_is_mesh_closed(value), "ref mesh must be a closed mesh"
             assert vtk_is_mesh_manifold(value), "ref mesh must be a manifold mesh"
             self._ref_vtk = value
-        elif value is None:
-            # empty mesh
-            self._ref_vtk = None
         else:
             raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
         
@@ -330,19 +325,18 @@ class DistanceMetrics:
             assert vtk_is_mesh_closed(value), "pred mesh must be a closed mesh"
             assert vtk_is_mesh_manifold(value), "pred mesh must be a manifold mesh"
             self._pred_vtk = value
-        elif value is None:
-            # empty mesh
-            self._pred_vtk = None
         else:
             raise ValueError("mask must be a numpy array, SimpleITK image or vtkPolyData")
         
     @property
+    @lru_cache
     def ref_is_empty(self) -> bool:
-        return self.ref_vtk is None
+        return self.ref_vtk.GetNumberOfPoints() == 0
 
     @property
+    @lru_cache
     def pred_is_empty(self) -> bool:
-        return self.pred_vtk is None
+        return self.pred_vtk.GetNumberOfPoints() == 0
 
     @property
     @lru_cache
@@ -350,25 +344,21 @@ class DistanceMetrics:
         if self.ref_is_empty or self.pred_is_empty:
             return None
         elif self.n_dim == 2:
-            d_ref2pred, b_ref, d_pred2ref, b_pred = self._distances_2D()
+            d_ref2pred, b_ref, d_pred2ref, b_pred = vtk_centroids2contour_measurements(
+            ref_contour=self.ref_vtk,
+            pred_contour=self.pred_vtk,
+            subdivide_iter=5,
+        )
         elif self.n_dim == 3:
-            d_ref2pred, b_ref, d_pred2ref, b_pred =  self._distances_3D()
+            d_ref2pred, b_ref, d_pred2ref, b_pred = vtk_centroids2surface_measurements(
+            ref_mesh=self.ref_vtk, 
+            pred_mesh=self.pred_vtk,
+            subdivide_iter=1
+        )
         else:
             raise ValueError("Only 2D and 3D masks are supported")
 
         return d_ref2pred, b_ref, d_pred2ref, b_pred
-
-    def _distances_2D(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        ref_contour, pred_contour = self.ref_vtk, self.pred_vtk
-
-        return vtk_centroids2contour_measurements(
-            ref_contour=ref_contour,
-            pred_contour=pred_contour,
-            subdivide_iter=5,
-        )
-
-    def _distances_3D(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        return vtk_centroids2surface_measurements(self.ref_vtk, self.pred_vtk, subdivide_iter=1)
 
     @staticmethod
     def perc_surface_dist(dists, b_sizes, perc) -> float:
