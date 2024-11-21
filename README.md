@@ -12,6 +12,7 @@
 - **Boundary Intersection over Union** (BIoU)
 
 By leveraging mesh representations of segmentation masks, `MeshMetrics` ensures precision in distance and boundary element size calculations. For further details and comparisons with other open-source tools supporting distance-based metric calculations, please refer to [our paper](https://arxiv.org/abs/2410.02630).
+`MeshMetrics` provides 2D and 3D implementations of various metrics and supports computing metrics using different segmentation representations (`numpy.ndarray`, `SimpleITK.Image`, and `vtk.vtkPolyData`). Additionally, it allows for flexibility in representation between reference and predicted segmentations - one input can be a mask image (`SimpleITK.Image`), while the other can be a surface mesh (`vtk.vtkPolyData`). For more details, refer to the *Advanced usage* section in [`examples.ipynb`](examples.ipynb).
 
 If you use `MeshMetrics` in your work, please cite:
 ```
@@ -33,7 +34,8 @@ $ pip install MeshMetrics/
 ```
 
 ## Usage
-Simple usage example of `MeshMetrics` for 3D segmentation masks is shown below. For more examples see: [`examples.ipynb`](examples.ipynb) notebook.
+Simple usage example of `MeshMetrics` for 3D segmentation masks is shown below.
+See [`examples.ipynb`](examples.ipynb) notebook for more examples.
 
 ```python
 from pathlib import Path
@@ -64,7 +66,7 @@ nsd2 = dist_metrics.nsd(tau=2)
 biou2 = dist_metrics.biou(tau=2)
 
 # ----------------------------------------
-# if loading masks from files with SimpleITK library, note that spacing needs to be reordered
+# If using `numpy.ndarray` representations, please note that the spacing must be reordered when converting a `SimpleITK.Image` object to a `numpy.ndarray`.
 import SimpleITK as sitk
 ref_path, pred_path = ..., ...
 ref_sitk, pred_sitk = sitk.ReadImage(ref_path), sitk.ReadImage(pred_path)
