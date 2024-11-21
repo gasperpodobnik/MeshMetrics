@@ -33,7 +33,7 @@ $ pip install MeshMetrics/
 ```
 
 ## Usage
-Simple usage example of `MeshMetrics` for 3D segmentation masks is shown below. See more examples in the [`examples.ipynb`](examples.ipynb) notebook.
+Simple usage example of `MeshMetrics` for 3D segmentation masks is shown below. For more examples see: [`examples.ipynb`](examples.ipynb) notebook.
 
 ```python
 from pathlib import Path
