@@ -23,7 +23,7 @@ def sitk2np(sitk_img: sitk.Image) -> np.ndarray:
     return np.swapaxes(sitk.GetArrayFromImage(sitk_img), 0, -1)
 
 
-def sitk_add_axis(img_sitk_2d, thickness):
+def sitk_add_axis(img_sitk_2d: sitk.Image, thickness: float) -> sitk.Image:
     ref_np_3d = sitk2np(img_sitk_2d)[..., np.newaxis]
     spacing = (*img_sitk_2d.GetSpacing(), thickness)
     img_sitk_3d = np2sitk(ref_np_3d, spacing=spacing)
@@ -314,70 +314,14 @@ def sort_dists_and_bsizes(dists, boundary_sizes) -> Tuple[np.ndarray, np.ndarray
     dists_s, boundary_sizes_s = _sorted[:, 0], _sorted[:, 1]
     return dists_s, boundary_sizes_s
 
-
-
-# def vtk_create_surface_from_single_polyline(polyline: vtk.vtkPolyData, z_offset: float) -> vtk.vtkPolyData:
-#     """Create two polylines offset in the z-direction by -z_offset and +z_offset."""
-    
-#     z_coord = vtk_to_numpy(polyline.GetPoints().GetData())[:,-1]
-#     assert np.all(z_coord[0] == z_coord), "Polyline must be planar in the z-direction"
-    
-#     points = polyline.GetPoints()
-#     num_points = points.GetNumberOfPoints()
-
-#     # Create two new point sets
-#     points1 = vtk.vtkPoints()
-#     points2 = vtk.vtkPoints()
-
-#     for i in range(num_points):
-#         x, y, z = points.GetPoint(i)
-#         points1.InsertNextPoint(x, y, z - z_offset)
-#         points2.InsertNextPoint(x, y, z + z_offset)
-
-#     # Create a polydata object to store the mesh
-#     polydata = vtk.vtkPolyData()
-#     mesh_points = vtk.vtkPoints()
-#     cells = vtk.vtkCellArray()
-
-#     # Add all points from both point sets to the mesh
-#     for i in range(num_points):
-#         mesh_points.InsertNextPoint(points1.GetPoint(i))
-#     for i in range(num_points):
-#         mesh_points.InsertNextPoint(points2.GetPoint(i))
-
-#     # Create triangles between the two polylines
-#     for i in range(num_points):  # Stop at second last point
-#         p1 = i  # Point from polyline1
-#         p2 = (i + 1) % num_points  # Next point from polyline1
-#         p3 = p1 + num_points  # Corresponding point from polyline2
-#         p4 = p2 + num_points  # Next point from polyline2
-
-#         # Add the two triangles forming the quadrilateral
-#         triangle1 = vtk.vtkTriangle()
-#         triangle1.GetPointIds().SetId(0, p1)
-#         triangle1.GetPointIds().SetId(1, p2)
-#         triangle1.GetPointIds().SetId(2, p3)
-
-#         triangle2 = vtk.vtkTriangle()
-#         triangle2.GetPointIds().SetId(0, p2)
-#         triangle2.GetPointIds().SetId(1, p4)
-#         triangle2.GetPointIds().SetId(2, p3)
-
-#         cells.InsertNextCell(triangle1)
-#         cells.InsertNextCell(triangle2)
-
-#     # Finalize the mesh
-#     polydata.SetPoints(mesh_points)
-#     polydata.SetPolys(cells)
-
-#     return polydata
-
-
 def vtk_create_surface_from_polydata(polydata: vtk.vtkPolyData, z_offset: float) -> vtk.vtkPolyData:
     """
     Create surfaces from multiple non-connected polylines within a vtkPolyData object.
     The function explicitly follows edges to ensure proper traversal.
     """
+
+    z_coord = vtk_to_numpy(polydata.GetPoints().GetData())[:,-1]
+    assert np.all(z_coord[0] == z_coord), "Polyline must be planar in the z-direction"
 
     # Ensure the input contains lines
     if polydata.GetNumberOfLines() == 0:
@@ -412,38 +356,40 @@ def vtk_create_surface_from_polydata(polydata: vtk.vtkPolyData, z_offset: float)
 
         # Offset polyline in the Z-direction
         num_points = len(polyline_points)
-        points1 = vtk.vtkPoints()
-        points2 = vtk.vtkPoints()
-
+        
+        # lower and upper points
+        pts_l = vtk.vtkPoints()
+        pts_u = vtk.vtkPoints()
         for pid in polyline_points:
             x, y, z = points.GetPoint(pid)
-            points1.InsertNextPoint(x, y, z - z_offset)
-            points2.InsertNextPoint(x, y, z + z_offset)
+            pts_l.InsertNextPoint(x, y, z - z_offset)
+            pts_u.InsertNextPoint(x, y, z + z_offset)
 
         # Add the points from both offsets to the combined mesh
         offset = combined_points.GetNumberOfPoints()
         for i in range(num_points):
-            combined_points.InsertNextPoint(points1.GetPoint(i))
+            combined_points.InsertNextPoint(pts_l.GetPoint(i))
         for i in range(num_points):
-            combined_points.InsertNextPoint(points2.GetPoint(i))
+            combined_points.InsertNextPoint(pts_u.GetPoint(i))
 
         # Create triangles between the two polylines
-        for i in range(num_points):
-            p1 = offset + i  # Point from polyline1
-            p2 = offset + (i + 1) % num_points  # Next point from polyline1
-            p3 = offset + i + num_points  # Corresponding point from polyline2
-            p4 = offset + (i + 1) % num_points + num_points  # Next point from polyline2
+        stp = 1 if num_points == 2 else 0
+        for i in range(num_points-stp):
+            l0 = offset + i  # Point from polyline1
+            l1 = offset + (i + 1) % num_points  # Next point from polyline1
+            u0 = l0 + num_points  # Corresponding point from polyline2
+            u1 = l1 + num_points  # Next point from polyline2
 
             # Add the two triangles forming the quadrilateral
             triangle1 = vtk.vtkTriangle()
-            triangle1.GetPointIds().SetId(0, p1)
-            triangle1.GetPointIds().SetId(1, p2)
-            triangle1.GetPointIds().SetId(2, p3)
+            triangle1.GetPointIds().SetId(0, l0)
+            triangle1.GetPointIds().SetId(1, u0)
+            triangle1.GetPointIds().SetId(2, l1)
 
             triangle2 = vtk.vtkTriangle()
-            triangle2.GetPointIds().SetId(0, p2)
-            triangle2.GetPointIds().SetId(1, p4)
-            triangle2.GetPointIds().SetId(2, p3)
+            triangle2.GetPointIds().SetId(0, l1)
+            triangle2.GetPointIds().SetId(1, u0)
+            triangle2.GetPointIds().SetId(2, u1)
 
             combined_cells.InsertNextCell(triangle1)
             combined_cells.InsertNextCell(triangle2)
@@ -476,11 +422,10 @@ def vtk_centroids2contour_measurements(
     Returns:
         Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: (numpy vector of distances between ref mesh vertices and pred mesh surface, numpy vector of distances between pred mesh vertices and ref mesh surface)
     """
-    
-    # ref_surface = vtk_create_surface_from_polylines(ref_contour, z_offset=1)
-    # pred_surface = vtk_create_surface_from_polylines(pred_contour, z_offset=1)
+
     ref_surface = vtk_create_surface_from_polydata(ref_contour, z_offset=1)
     pred_surface = vtk_create_surface_from_polydata(pred_contour, z_offset=1)
+
     for _ in range(subdivide_iter):
         ref_contour = vtkLinearSubdividePolyline(ref_contour)
         pred_contour = vtkLinearSubdividePolyline(pred_contour)        
@@ -780,11 +725,27 @@ def create_synthetic_examples_2d(r1: float, r2: float, spacing: tuple) -> vtk.vt
     vtk_mesh1 = extract_cirle_from_sphere(vtk_mesh1_3d)
     vtk_mesh2 = extract_cirle_from_sphere(vtk_mesh2_3d)
     
-    vtk_write_polydata(vtk_mesh1, "circle1.obj")
-    
     # create a meta image SimpleITK that encompasses both masks
     meta_sitk = vtk_meshes_bbox_sitk_image(vtk_mesh1, vtk_mesh2, spacing, tolerance=5*np.array(spacing))
     sitk_mask1 = vtk_voxelizer(vtk_mesh1, meta_sitk)
     sitk_mask2 = vtk_voxelizer(vtk_mesh2, meta_sitk)
     
     return vtk_mesh1, vtk_mesh2, sitk_mask1, sitk_mask2
+
+def calculate_metrics_and_print_scores(dist_metrics_class, tau: float = 2):
+    """Simple function to calculate metric scores and print results."""
+    # Hausdorff Distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
+    hd100 = dist_metrics_class.hd()
+    # 95th percentile HD
+    hd95 = dist_metrics_class.hd(percentile=95)
+    # Mean Average Surface Distance (MASD)
+    masd = dist_metrics_class.masd()
+    # Average Symmetric Surface Distance (ASSD)
+    assd = dist_metrics_class.assd()
+    # Normalized Surface Distance (NSD) with tau
+    nsd2 = dist_metrics_class.nsd(tau=tau)
+    # Boundary Intersection over Union (BIoU) with tau
+    biou2 = dist_metrics_class.biou(tau=tau)
+    
+    # print results
+    print(f"HD100: {hd100:.2f} mm, HD (perc=95): {hd95:.2f} mm, MASD: {masd:.2f} mm, ASSD: {assd:.2f} mm, NSD (tau={tau} mm): {nsd2*100:.2f} %, BIoU (tau={tau} mm): {biou2*100:.2f} %")
