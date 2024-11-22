@@ -255,7 +255,7 @@ class DistanceMetrics:
             labelimfilter = sitk.LabelShapeStatisticsImageFilter()
             labelimfilter.Execute(value)
             assert labelimfilter.GetNumberOfLabels() < 2, "mask must include background and up to one foreground class"
-            self._ref_sitk = value
+            self._ref_sitk = value > 0
             self.spacing = value.GetSpacing()
         elif isinstance(value, vtk.vtkPolyData):
             raise NotImplementedError("Conversion from vtkPolyData to SimpleITK image needs to happen in the input setter")
@@ -278,7 +278,7 @@ class DistanceMetrics:
             labelimfilter = sitk.LabelShapeStatisticsImageFilter()
             labelimfilter.Execute(value)
             assert labelimfilter.GetNumberOfLabels() < 2, "mask must include background and up to one foreground class"
-            self._pred_sitk = value
+            self._pred_sitk = value > 0
         elif isinstance(value, vtk.vtkPolyData):
             raise NotImplementedError("Conversion from vtkPolyData to SimpleITK image needs to happen in the input setter")
         else:
