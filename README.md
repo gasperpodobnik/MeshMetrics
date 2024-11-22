@@ -15,7 +15,7 @@
 
 By leveraging mesh representations of segmentation masks, `MeshMetrics` ensures precision in distance and boundary element size calculations. For further details and comparisons with other open-source tools supporting distance-based metric calculations, please refer to [our paper](https://arxiv.org/abs/2410.02630).
 
-![](./data/paper_overview.png)
+![overview](./data/paper_overview.png)
 
 If you use `MeshMetrics` in your work, please cite:
 ```
