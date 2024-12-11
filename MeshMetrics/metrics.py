@@ -453,3 +453,15 @@ class DistanceMetrics:
             denom = np.logical_or(ref_hollow_np, pred_hollow_np).sum()
 
             return num / denom
+
+    def dsc(self) -> float:
+        if self.ref_is_empty and self.pred_is_empty:
+            logging.warning("Both masks are empty")
+            return np.nan
+        elif self.ref_is_empty or self.pred_is_empty:
+            logging.warning("One of the masks is empty")
+            return 0
+        else:
+            intersection = np.logical_and(self.ref_np, self.pred_np).sum()
+            union = np.logical_or(self.ref_np, self.pred_np).sum()
+            return 2 * intersection / (union + intersection)
