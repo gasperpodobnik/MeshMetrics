@@ -433,6 +433,10 @@ class DistanceMetrics:
             return num / denom
 
     def biou(self, tau) -> float:
+        """NOTE: this is not a true mesh-based calculation, 
+        but rather a mask-based calculation. This is because 
+        boolean operations on meshes are not well defined."""
+        
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau > 0, "tolerance must be greater than or equal to zero"
 
@@ -455,6 +459,10 @@ class DistanceMetrics:
             return num / denom
 
     def dsc(self) -> float:
+        """NOTE: this is not a true mesh-based calculation, 
+        but rather a mask-based calculation. This is because 
+        boolean operations on meshes are not well defined."""
+        
         if self.ref_is_empty and self.pred_is_empty:
             logging.warning("Both masks are empty")
             return np.nan
