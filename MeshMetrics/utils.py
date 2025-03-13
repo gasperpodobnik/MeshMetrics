@@ -153,7 +153,9 @@ def vtk_3D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
 
     if sitk.GetArrayFromImage(src_img).sum() == 0:
         return vtk.vtkPolyData()
-    vtkImage = sitk2vtk(src_img > 0)
+    
+    # vtkDiscreteMarchingCubes normals point inward by default, so we invert the image
+    vtkImage = sitk2vtk(src_img == 0)
 
     # segmentation --> polygonal data:
     meshing_alg = vtk.vtkDiscreteMarchingCubes()
