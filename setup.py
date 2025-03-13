@@ -2,7 +2,7 @@
 
 from setuptools import setup
 
-setup(name="Distance-based metrics for segmentation evaluation",
+setup(name="MeshMetrics",
       version="0.1",
       description=(
           "Library to compute distance-based performance metrics for image segmentation tasks."),
