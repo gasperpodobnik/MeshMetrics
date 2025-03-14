@@ -353,7 +353,7 @@ class DistanceMetrics:
             d_ref2pred, b_ref, d_pred2ref, b_pred = vtk_centroids2surface_measurements(
             ref_mesh=self.ref_vtk, 
             pred_mesh=self.pred_vtk,
-            subdivide_iter=1
+            subdivide_iter=0
         )
         else:
             raise ValueError("Only 2D and 3D masks are supported")

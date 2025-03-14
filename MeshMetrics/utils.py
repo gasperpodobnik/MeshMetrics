@@ -458,6 +458,28 @@ def vtk_compute_cell_sizes(mesh: vtk.vtkPolyData) -> np.ndarray:
         cell_sizes[enum] = mesh.GetCell(enum).ComputeArea()
     return cell_sizes
 
+import torch
+import kaolin as kal
+def vtk2kaolin(mesh_vtk):
+    from meshparty.trimesh_vtk import poly_to_mesh_components
+    vertices_np, faces_np, _ = poly_to_mesh_components(mesh_vtk)
+    vertices_torch = torch.tensor(vertices_np).float()
+    faces_torch = torch.tensor(faces_np).long()
+    mesh = kal.rep.SurfaceMesh(
+        vertices=vertices_torch,
+        faces=faces_torch,
+        allow_auto_compute=False
+    )  # disable auto-compute for now
+    return mesh.cuda()
+
+def kal_distances(face_vertices_pts, face_vertices_mesh):
+    pts_centroids = face_vertices_pts.mean(dim=2)
+    distance, faceidx, dist_type = kal.metrics.trianglemesh.point_to_mesh_distance(
+        pts_centroids,
+        face_vertices_mesh,
+    )
+    distance_sq = torch.sqrt(distance)
+    return distance_sq
 
 def vtk_centroids2surface_measurements(
     ref_mesh: vtk.vtkPolyData,
@@ -478,22 +500,18 @@ def vtk_centroids2surface_measurements(
     for _ in range(subdivide_iter):
         ref_mesh = vtk_subdivide_mesh(ref_mesh)
         pred_mesh = vtk_subdivide_mesh(pred_mesh)
+        
+    ref_mesh_kal = vtk2kaolin(ref_mesh)
+    pred_mesh_kal = vtk2kaolin(pred_mesh)
+    
+    ref_face_vertices = kal.ops.mesh.index_vertices_by_faces(ref_mesh_kal.vertices[None], ref_mesh_kal.faces)
+    pred_face_vertices = kal.ops.mesh.index_vertices_by_faces(pred_mesh_kal.vertices[None], pred_mesh_kal.faces)
 
-    vtk_p2v_dist = vtk.vtkDistancePolyDataFilter()
-    vtk_p2v_dist.SetInputData(0, ref_mesh)
-    vtk_p2v_dist.SetInputData(1, pred_mesh)
-    vtk_p2v_dist.SignedDistanceOff()
-    vtk_p2v_dist.ComputeCellCenterDistanceOn()
-    vtk_p2v_dist.ComputeSecondDistanceOn()
-    vtk_p2v_dist.Update()
-    dists_ref2pred = vtk_to_numpy(
-        vtk_p2v_dist.GetOutput().GetCellData().GetArray("Distance")
-    )
-    dists_pred2ref = vtk_to_numpy(
-        vtk_p2v_dist.GetSecondDistanceOutput().GetCellData().GetArray("Distance")
-    )
-    surfel_areas_ref = vtk_compute_cell_sizes(ref_mesh)
-    surfel_areas_pred = vtk_compute_cell_sizes(pred_mesh)
+    dists_ref2pred = kal_distances(ref_face_vertices, pred_face_vertices).squeeze().cpu().numpy()
+    dists_pred2ref = kal_distances(pred_face_vertices, ref_face_vertices).squeeze().cpu().numpy()
+    
+    surfel_areas_ref = kal.ops.mesh.face_areas(ref_mesh_kal.vertices[None], ref_mesh_kal.faces).squeeze().cpu().numpy()
+    surfel_areas_pred = kal.ops.mesh.face_areas(pred_mesh_kal.vertices[None], pred_mesh_kal.faces).squeeze().cpu().numpy()
 
     # fmt: off
     # sort distances and boundary sizes
