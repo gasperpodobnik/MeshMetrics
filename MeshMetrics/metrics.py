@@ -370,8 +370,7 @@ class DistanceMetrics:
         else:
             return np.inf
 
-    def hd(self, percentile=100) -> float:
-        assert isinstance(percentile, int), "percentile must be an integer"
+    def hd(self, percentile: float = 100.0) -> float:
         assert 0 <= percentile <= 100, "percentile must be between 0 and 100"
 
         if self.ref_is_empty and self.pred_is_empty:
@@ -380,8 +379,8 @@ class DistanceMetrics:
             return np.inf
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
-            perc_d_ref2pred = self.perc_surface_dist(d_ref2pred, b_ref, percentile)
-            perc_d_pred2ref = self.perc_surface_dist(d_pred2ref, b_pred, percentile)
+            perc_d_ref2pred = self.perc_surface_dist(np.abs(d_ref2pred), b_ref, percentile)
+            perc_d_pred2ref = self.perc_surface_dist(np.abs(d_pred2ref), b_pred, percentile)
             return max(perc_d_ref2pred, perc_d_pred2ref)
 
     def masd(self) -> float:
@@ -393,9 +392,9 @@ class DistanceMetrics:
             return np.inf
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
-            d_ref2pred = (d_ref2pred @ b_ref) / b_ref.sum()  # change to * operator
-            d_pred2ref = (d_pred2ref @ b_pred) / b_pred.sum()  # change to * operator
-            return (d_ref2pred + d_pred2ref) / 2
+            mean_d_ref2pred = (np.abs(d_ref2pred) @ b_ref) / b_ref.sum()  # change to * operator
+            mean_d_pred2ref = (np.abs(d_pred2ref) @ b_pred) / b_pred.sum()  # change to * operator
+            return (mean_d_ref2pred + mean_d_pred2ref) / 2
 
     def assd(self) -> float:
         if self.ref_is_empty and self.pred_is_empty:
@@ -405,14 +404,14 @@ class DistanceMetrics:
             return np.inf
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
-            num = d_ref2pred @ b_ref + d_pred2ref @ b_pred
+            num = np.abs(d_ref2pred) @ b_ref + np.abs(d_pred2ref) @ b_pred
             denom = b_ref.sum() + b_pred.sum()
             if denom == 0:
                 raise ValueError("sum of boundary sizes is zero, something weird is going on")
             value = num / denom
             return value
 
-    def nsd(self, tau) -> float:
+    def nsd(self, tau: float) -> float:
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau >= 0, "tolerance must be greater than or equal to zero"
 
@@ -424,15 +423,15 @@ class DistanceMetrics:
             return 0
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
-            overlap_ref = b_ref[d_ref2pred <= tau].sum()
-            overlap_pred = b_pred[d_pred2ref <= tau].sum()
+            overlap_ref = b_ref[np.abs(d_ref2pred) <= tau].sum()
+            overlap_pred = b_pred[np.abs(d_pred2ref) <= tau].sum()
             num = overlap_ref + overlap_pred
             denom = b_ref.sum() + b_pred.sum()
             if denom == 0:
                 raise ValueError("sum of boundary sizes is zero, something weird is going on")
             return num / denom
 
-    def biou(self, tau) -> float:
+    def biou(self, tau: float) -> float:
         """NOTE: this is not a true mesh-based calculation, 
         but rather a mask-based calculation. This is because 
         boolean operations on meshes are not well defined."""
@@ -473,3 +472,42 @@ class DistanceMetrics:
             intersection = np.logical_and(self.ref_np, self.pred_np).sum()
             union = np.logical_or(self.ref_np, self.pred_np).sum()
             return 2 * intersection / (union + intersection)
+        
+    # --------------- experimental metrics
+    def _ref_nsd(self, tau: float) -> float:
+        assert isinstance(tau, (int, float)), "tolerance must be a float"
+        assert tau >= 0, "tolerance must be greater than or equal to zero"
+
+        if self.ref_is_empty and self.pred_is_empty:
+            logging.warning("Both masks are empty")
+            return np.nan
+        elif self.ref_is_empty or self.pred_is_empty:
+            logging.warning("One of the masks is empty")
+            return 0
+        else:
+            d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
+            overlap_ref = b_ref[np.abs(d_ref2pred) <= tau].sum()
+            num = overlap_ref
+            denom = b_ref.sum()
+            if denom == 0:
+                raise ValueError("sum of boundary sizes is zero, something weird is going on")
+            return num / denom
+        
+    def _underseg_nsd(self, tau: float) -> float:
+        assert isinstance(tau, (int, float)), "tolerance must be a float"
+        assert tau >= 0, "tolerance must be greater than or equal to zero"
+
+        if self.ref_is_empty and self.pred_is_empty:
+            logging.warning("Both masks are empty")
+            return np.nan
+        elif self.ref_is_empty or self.pred_is_empty:
+            logging.warning("One of the masks is empty")
+            return 0
+        else:
+            d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
+            overlap_ref = b_ref[d_ref2pred >= -tau].sum()
+            num = overlap_ref
+            denom = b_ref.sum()
+            if denom == 0:
+                raise ValueError("sum of boundary sizes is zero, something weird is going on")
+            return num / denom

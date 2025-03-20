@@ -312,8 +312,11 @@ def vtk_2D_centroid2surface_dist_length(
 
 
 def sort_dists_and_bsizes(dists, boundary_sizes) -> Tuple[np.ndarray, np.ndarray]:
-    _sorted = np.array(sorted(zip(dists, boundary_sizes)))
-    dists_s, boundary_sizes_s = _sorted[:, 0], _sorted[:, 1]
+    reidx = np.argsort(np.abs(dists))
+    dists_s = dists[reidx]
+    boundary_sizes_s = boundary_sizes[reidx]
+    # _sorted = np.array(sorted(zip(dists, boundary_sizes)))
+    # dists_s, boundary_sizes_s = _sorted[:, 0], _sorted[:, 1]
     return dists_s, boundary_sizes_s
 
 def vtk_create_surface_from_polydata(polydata: vtk.vtkPolyData, z_offset: float) -> vtk.vtkPolyData:
@@ -482,7 +485,8 @@ def vtk_centroids2surface_measurements(
     vtk_p2v_dist = vtk.vtkDistancePolyDataFilter()
     vtk_p2v_dist.SetInputData(0, ref_mesh)
     vtk_p2v_dist.SetInputData(1, pred_mesh)
-    vtk_p2v_dist.SignedDistanceOff()
+    # vtk_p2v_dist.SignedDistanceOff()
+    vtk_p2v_dist.SignedDistanceOn()
     vtk_p2v_dist.ComputeCellCenterDistanceOn()
     vtk_p2v_dist.ComputeSecondDistanceOn()
     vtk_p2v_dist.Update()
