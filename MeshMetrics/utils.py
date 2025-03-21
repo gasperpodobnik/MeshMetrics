@@ -579,23 +579,6 @@ def get_boundary_region(
     
     return sitk2np(ref_hollowed_seg) > 0, sitk2np(pred_hollowed_seg) > 0
 
-def get_hollow_mask(ref_mask: sitk.Image, pred_mask: sitk.Image, tau: float) -> Tuple[np.ndarray, np.ndarray]:
-    assert tau > 0, "Distance must be positive"
-
-    edt_sitk = sitk.SignedMaurerDistanceMapImageFilter()
-    edt_sitk.SquaredDistanceOff()
-    edt_sitk.SetInsideIsPositive(True)
-    edt_sitk.SetUseImageSpacing(True)
-    ref_dist_field = edt_sitk.Execute(ref_mask > 0)
-    pred_dist_field = edt_sitk.Execute(pred_mask > 0)
-
-    # get hollowed masks
-    sitk_and = sitk.AndImageFilter()
-    ref_hollowed_seg = sitk_and.Execute(ref_dist_field < tau, ref_dist_field >= 0)
-    pred_hollowed_seg = sitk_and.Execute(pred_dist_field < tau, pred_dist_field >= 0)
-    
-    return sitk2np(ref_hollowed_seg) > 0, sitk2np(pred_hollowed_seg) > 0
-
 def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
     assert isinstance(mesh_vtk, vtk.vtkPolyData), "Mesh must be vtkPolyData"
     assert isinstance(meta_sitk, sitk.Image), "Segmentation must be SimpleITK image"

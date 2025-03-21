@@ -11,7 +11,6 @@ from .utils import (
     sitk2np,
     vtk_centroids2contour_measurements,
     vtk_centroids2surface_measurements,
-    get_hollow_mask,
     vtk_voxelizer,
     vtk_is_mesh_closed,
     vtk_is_mesh_manifold,
@@ -360,6 +359,26 @@ class DistanceMetrics:
 
         return d_ref2pred, b_ref, d_pred2ref, b_pred
 
+    @property
+    @lru_cache
+    def img_dist_field(self) -> Tuple[np.ndarray, np.ndarray]:
+        # crop the masks to the bounding box
+        union_sitk = (self.ref_sitk + self.pred_sitk) > 0
+        label_filter = sitk.LabelStatisticsImageFilter()
+        label_filter.Execute(union_sitk, union_sitk)
+        xmin, xmax, ymin, ymax, zmin, zmax = label_filter.GetBoundingBox(1)
+        
+        ref_bbox_sitk = self.ref_sitk[xmin:xmax+1, ymin:ymax+1, zmin:zmax+1]
+        pred_bbox_sitk = self.pred_sitk[xmin:xmax+1, ymin:ymax+1, zmin:zmax+1]
+
+        edt_sitk = sitk.SignedMaurerDistanceMapImageFilter()
+        edt_sitk.SquaredDistanceOff()
+        edt_sitk.SetInsideIsPositive(True)
+        edt_sitk.SetUseImageSpacing(True)
+        ref_dist_field = edt_sitk.Execute(ref_bbox_sitk)
+        pred_dist_field = edt_sitk.Execute(pred_bbox_sitk)
+        return sitk2np(ref_dist_field), sitk2np(pred_dist_field)
+
     @staticmethod
     def perc_surface_dist(dists, b_sizes, perc) -> float:
         if len(dists) > 0:
@@ -437,7 +456,7 @@ class DistanceMetrics:
         boolean operations on meshes are not well defined."""
         
         assert isinstance(tau, (int, float)), "tolerance must be a float"
-        assert tau > 0, "tolerance must be greater than or equal to zero"
+        assert tau > 0, "tolerance must be greater than zero"
 
         if self.ref_is_empty and self.pred_is_empty:
             logging.warning("Both masks are empty")
@@ -446,14 +465,13 @@ class DistanceMetrics:
             logging.warning("One of the masks is empty")
             return 0
         else:
-            ref_hollow_np, pred_hollow_np = get_hollow_mask(
-                ref_mask=self.ref_sitk, 
-                pred_mask=self.pred_sitk,
-                tau=tau
-            )
+            ref_dist_field_np, pred_dist_field_np = self.img_dist_field
             
-            num = np.logical_and(ref_hollow_np, pred_hollow_np).sum()
-            denom = np.logical_or(ref_hollow_np, pred_hollow_np).sum()
+            ref_hollow = (ref_dist_field_np < tau) & (ref_dist_field_np >= 0)
+            pred_hollow = (pred_dist_field_np < tau) & (pred_dist_field_np >= 0)
+            
+            num = (ref_hollow & pred_hollow).sum()
+            denom = (ref_hollow | pred_hollow).sum()
 
             return num / denom
 
