@@ -113,10 +113,10 @@ class DistanceMetrics:
         self.clear_cache()
         assert isinstance(ref, sitk.Image), "ref must be a SimpleITK image"
         assert isinstance(pred, sitk.Image), "pred must be a SimpleITK image"
-        assert ref.GetOrigin() == pred.GetOrigin(), "input mask origin must be the same"
-        assert ref.GetSpacing() == pred.GetSpacing(), "input mask spacing must be the same"
         assert ref.GetSize() == pred.GetSize(), "input mask size must be the same"
-        assert ref.GetDirection() == pred.GetDirection(), "input mask direction must be the same"
+        assert np.allclose(ref.GetOrigin(), pred.GetOrigin()), "input mask origin must be the same"
+        assert np.allclose(ref.GetSpacing(), pred.GetSpacing()), "input mask spacing must be the same"
+        assert np.allclose(ref.GetDirection(), pred.GetDirection()), "input mask direction must be the same"
         
         self.ref_sitk = ref
         self.pred_sitk = pred
