@@ -366,10 +366,16 @@ class DistanceMetrics:
         union_sitk = (self.ref_sitk + self.pred_sitk) > 0
         label_filter = sitk.LabelStatisticsImageFilter()
         label_filter.Execute(union_sitk, union_sitk)
-        xmin, xmax, ymin, ymax, zmin, zmax = label_filter.GetBoundingBox(1)
         
-        ref_bbox_sitk = self.ref_sitk[xmin:xmax+1, ymin:ymax+1, zmin:zmax+1]
-        pred_bbox_sitk = self.pred_sitk[xmin:xmax+1, ymin:ymax+1, zmin:zmax+1]
+        if self.n_dim == 2:
+            # 2D case, we need to get the bounding box for the first label
+            xmin, xmax, ymin, ymax = label_filter.GetBoundingBox(1)
+            ref_bbox_sitk = self.ref_sitk[xmin:xmax+1, ymin:ymax+1]
+            pred_bbox_sitk = self.pred_sitk[xmin:xmax+1, ymin:ymax+1]
+        else:
+            xmin, xmax, ymin, ymax, zmin, zmax = label_filter.GetBoundingBox(1)
+            ref_bbox_sitk = self.ref_sitk[xmin:xmax+1, ymin:ymax+1, zmin:zmax+1]
+            pred_bbox_sitk = self.pred_sitk[xmin:xmax+1, ymin:ymax+1, zmin:zmax+1]
 
         edt_sitk = sitk.SignedMaurerDistanceMapImageFilter()
         edt_sitk.SquaredDistanceOff()
