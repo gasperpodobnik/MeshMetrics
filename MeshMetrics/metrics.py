@@ -398,7 +398,6 @@ class DistanceMetrics:
             d_ref2pred, b_ref, d_pred2ref, b_pred = vtk_measurements_2D(
                 ref_contour=self.ref_vtk,
                 pred_contour=self.pred_vtk,
-                # subdivide_iter=5,
             )
         elif self.n_dim == 3:
             d_ref2pred, b_ref, d_pred2ref, b_pred = vtk_measurements_3D(
