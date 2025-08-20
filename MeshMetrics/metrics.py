@@ -210,56 +210,6 @@ class DistanceMetrics:
                         cl_attr_fget.cache_clear()
 
     @property
-    def ref_np(self) -> np.ndarray:
-        return self._ref_np
-
-    @ref_np.setter
-    def ref_np(self, value: np.ndarray):
-        if self._ref_np is not None:
-            pass
-        elif isinstance(value, np.ndarray):
-            assert value.dtype == bool, "mask must be a boolean array"
-            self._ref_np = value.astype("uint8")
-        elif isinstance(value, sitk.Image):
-            assert id(value) == id(
-                self.ref_sitk
-            ), "mask must be the same object as the `ref_sitk`"
-            self._ref_np = sitk2np(value)
-        elif isinstance(value, vtk.vtkPolyData):
-            raise NotImplementedError(
-                "Conversion from vtk.vtkPolyData to numpy.ndarray is not implemented"
-            )
-        else:
-            raise ValueError(
-                "mask must be a numpy.ndarray, SimpleITK.Image or vtk.vtkPolyData"
-            )
-
-    @property
-    def pred_np(self) -> np.ndarray:
-        return self._pred_np
-
-    @pred_np.setter
-    def pred_np(self, value: np.ndarray):
-        if self._pred_np is not None:
-            pass
-        elif isinstance(value, np.ndarray):
-            assert value.dtype == bool, "mask must be a boolean array"
-            self._pred_np = value.astype("uint8")
-        elif isinstance(value, sitk.Image):
-            assert id(value) == id(
-                self.pred_sitk
-            ), "mask must be the same object as the `pred_sitk`"
-            self._pred_np = sitk2np(value)
-        elif isinstance(value, vtk.vtkPolyData):
-            raise NotImplementedError(
-                "Conversion from vtk.vtkPolyData to numpy.ndarray is not implemented"
-            )
-        else:
-            raise ValueError(
-                "mask must be a numpy.ndarray, SimpleITK.Image or vtk.vtkPolyData"
-            )
-
-    @property
     def spacing(self) -> tuple:
         return self._spacing
 
@@ -276,39 +226,136 @@ class DistanceMetrics:
             assert len(value) in [2, 3], "only 2D or 3D calculations are supported"
             self._spacing = tuple(value)
 
+    def _set_np(self, name: str, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
+        """
+        Internal helper for ref_np and pred_np setters.
+        name: 'ref' or 'pred'
+        """
+        attr = f"_{name}_np"
+        sitk_attr = getattr(self, f"{name}_sitk", None)
+
+        if getattr(self, attr) is not None:
+            return
+
+        if isinstance(value, np.ndarray):
+            assert value.dtype == bool, f"{name}_np mask must be a boolean array"
+            setattr(self, attr, value.astype("uint8"))
+
+        elif isinstance(value, sitk.Image):
+            assert (
+                sitk_attr is not None
+            ), f"{name}_sitk must exist before assigning {name}_np"
+            assert id(value) == id(
+                sitk_attr
+            ), f"mask must be the same object as `{name}_sitk`"
+            setattr(self, attr, sitk2np(value))
+
+        elif isinstance(value, vtk.vtkPolyData):
+            raise NotImplementedError(
+                f"Conversion from vtk.vtkPolyData to numpy.ndarray is not implemented for {name}_np"
+            )
+
+        else:
+            raise ValueError(
+                f"{name}_np mask must be a numpy.ndarray, SimpleITK.Image, or vtk.vtkPolyData"
+            )
+
+    def _set_sitk(
+        self, name: str, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]
+    ):
+        """
+        Internal helper for ref_sitk and pred_sitk setters.
+        name: 'ref' or 'pred'
+        """
+        attr = f"_{name}_sitk"
+        np_attr = getattr(self, f"{name}_np")
+
+        if getattr(self, attr) is not None:
+            return
+
+        if isinstance(value, np.ndarray):
+            assert id(value) == id(
+                np_attr
+            ), f"mask must be the same object as `{name}_np`"
+            setattr(self, attr, np2sitk(value, spacing=self.spacing))
+
+        elif isinstance(value, sitk.Image):
+            # optional asserts about pixel type, number of labels, etc.
+            setattr(self, attr, value)
+            self.spacing = value.GetSpacing()
+
+        elif isinstance(value, vtk.vtkPolyData):
+            raise NotImplementedError(
+                f"Conversion from vtk.vtkPolyData to SimpleITK.Image needs "
+                f"to happen in the {name}_sitk setter input"
+            )
+
+        else:
+            raise ValueError(
+                "mask must be a numpy.ndarray, SimpleITK.Image or vtk.vtkPolyData"
+            )
+
+    def _set_vtk(
+        self, name: str, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]
+    ):
+        """
+        Internal helper for ref_vtk and pred_vtk setters.
+        name: 'ref' or 'pred'
+        """
+        attr = f"_{name}_vtk"
+        sitk_attr = getattr(self, f"{name}_sitk", None)
+        np_attr = getattr(self, f"{name}_np", None)
+
+        if getattr(self, attr) is not None:
+            return
+
+        if isinstance(value, (np.ndarray, sitk.Image)):
+            assert (
+                sitk_attr is not None
+            ), f"{name}_sitk must be set before setting the mesh"
+            if isinstance(value, np.ndarray):
+                assert id(value) == id(
+                    np_attr
+                ), f"mask must be the same object as `{name}_np`"
+            else:  # sitk.Image
+                assert id(value) == id(
+                    sitk_attr
+                ), f"mask must be the same object as `{name}_sitk`"
+            setattr(self, attr, vtk_meshing(sitk_attr))
+
+        elif isinstance(value, vtk.vtkPolyData):
+            assert vtk_is_mesh_closed(value), f"{name} mesh must be closed"
+            assert vtk_is_mesh_manifold(value), f"{name} mesh must be manifold"
+            setattr(self, attr, value)
+
+        else:
+            raise ValueError(
+                f"{name}_vtk mask must be a numpy.ndarray, SimpleITK.Image, or vtk.vtkPolyData"
+            )
+
+    @property
+    def ref_np(self) -> np.ndarray:
+        return self._ref_np
+
+    @ref_np.setter
+    def ref_np(self, value: np.ndarray):
+        self._set_np("ref", value)
+
+    @property
+    def pred_np(self) -> np.ndarray:
+        return self._pred_np
+
+    @pred_np.setter
+    def pred_np(self, value: np.ndarray):
+        self._set_np("pred", value)
+
     @property
     def ref_sitk(self) -> sitk.Image:
         return self._ref_sitk
 
     @ref_sitk.setter
     def ref_sitk(self, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
-        if self._ref_sitk is not None:
-            pass
-        elif isinstance(value, np.ndarray):
-            assert id(value) == id(
-                self.ref_np
-            ), "mask must be the same object as the `ref_np`"
-            self._ref_sitk = np2sitk(value, spacing=self.spacing)
-        elif isinstance(value, sitk.Image):
-            # assert (
-            #     value.GetPixelID() == sitk.sitkUInt8
-            # ), "mask must be a sitk image with pixel type UInt8"
-            # labelimfilter = sitk.LabelShapeStatisticsImageFilter()
-            # labelimfilter.Execute(value)
-            # assert (
-            #     labelimfilter.GetNumberOfLabels() < 2
-            # ), "mask must include background and up to one foreground class"
-            # self._ref_sitk = value > 0
-            self._ref_sitk = value
-            self.spacing = value.GetSpacing()
-        elif isinstance(value, vtk.vtkPolyData):
-            raise NotImplementedError(
-                "Conversion from vtk.vtkPolyData to SimpleITK.Image needs to happen in the input setter"
-            )
-        else:
-            raise ValueError(
-                "mask must be a numpy.ndarray, SimpleITK.Image or vtk.vtkPolyData"
-            )
+        self._set_sitk("ref", value)
 
     @property
     def pred_sitk(self) -> sitk.Image:
@@ -316,29 +363,7 @@ class DistanceMetrics:
 
     @pred_sitk.setter
     def pred_sitk(self, value: Union[sitk.Image, np.ndarray, vtk.vtkPolyData]):
-        if self._pred_sitk is not None:
-            pass
-        elif isinstance(value, np.ndarray):
-            assert id(value) == id(
-                self.pred_np
-            ), "mask must be the same object as the `pred_np`"
-            self._pred_sitk = np2sitk(value, spacing=self.spacing)
-        elif isinstance(value, sitk.Image):
-            # assert value.GetPixelID() == sitk.sitkUInt8, "mask must be a sitk image with pixel type UInt8"
-            # labelimfilter = sitk.LabelShapeStatisticsImageFilter()
-            # labelimfilter.Execute(value)
-            # assert labelimfilter.GetNumberOfLabels() < 2, "mask must include background and up to one foreground class"
-            # self._pred_sitk = value > 0
-            self._pred_sitk = value
-            self.spacing = value.GetSpacing()
-        elif isinstance(value, vtk.vtkPolyData):
-            raise NotImplementedError(
-                "Conversion from vtk.vtkPolyData to SimpleITK.Image needs to happen in the input setter"
-            )
-        else:
-            raise ValueError(
-                "mask must be a numpy.ndarray, SimpleITK.Image or vtk.vtkPolyData"
-            )
+        self._set_sitk("pred", value)
 
     @property
     def ref_vtk(self) -> vtk.vtkPolyData:
@@ -346,29 +371,7 @@ class DistanceMetrics:
 
     @ref_vtk.setter
     def ref_vtk(self, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
-        if self._ref_vtk is not None:
-            pass
-        elif isinstance(value, np.ndarray):
-            assert id(value) == id(
-                self.ref_np
-            ), "mask must be the same object as the `ref_np`"
-            assert hasattr(
-                self, "ref_sitk"
-            ), "ref_sitk must be set before setting the mesh"
-            self._ref_vtk = vtk_meshing(self.ref_sitk)
-        elif isinstance(value, sitk.Image):
-            assert id(value) == id(
-                self.ref_sitk
-            ), "mask must be the same object as the `ref_sitk`"
-            self._ref_vtk = vtk_meshing(self.ref_sitk)
-        elif isinstance(value, vtk.vtkPolyData):
-            assert vtk_is_mesh_closed(value), "ref mesh must be a closed mesh"
-            assert vtk_is_mesh_manifold(value), "ref mesh must be a manifold mesh"
-            self._ref_vtk = value
-        else:
-            raise ValueError(
-                "mask must be a numpy.ndarray, SimpleITK.Image or vtk.vtkPolyData"
-            )
+        self._set_vtk("ref", value)
 
     @property
     def pred_vtk(self) -> vtk.vtkPolyData:
@@ -376,29 +379,7 @@ class DistanceMetrics:
 
     @pred_vtk.setter
     def pred_vtk(self, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
-        if self._pred_vtk is not None:
-            pass
-        elif isinstance(value, np.ndarray):
-            assert id(value) == id(
-                self.pred_np
-            ), "mask must be the same object as the `pred_np`"
-            assert hasattr(
-                self, "pred_sitk"
-            ), "pred_sitk must be set before setting the mesh"
-            self._pred_vtk = vtk_meshing(self.pred_sitk)
-        elif isinstance(value, sitk.Image):
-            assert id(value) == id(
-                self.pred_sitk
-            ), "mask must be the same object as the `pred_sitk`"
-            self._pred_vtk = vtk_meshing(self.pred_sitk)
-        elif isinstance(value, vtk.vtkPolyData):
-            assert vtk_is_mesh_closed(value), "pred mesh must be a closed mesh"
-            assert vtk_is_mesh_manifold(value), "pred mesh must be a manifold mesh"
-            self._pred_vtk = value
-        else:
-            raise ValueError(
-                "mask must be a numpy.ndarray, SimpleITK.Image or vtk.vtkPolyData"
-            )
+        self._set_vtk("pred", value)
 
     @property
     @lru_cache
