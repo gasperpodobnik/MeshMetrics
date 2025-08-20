@@ -9,15 +9,13 @@ from .utils import (
     vtk_meshing,
     np2sitk,
     sitk2np,
-    vtk_centroids2contour_measurements,
-    vtk_centroids2surface_measurements,
+    vtk_measurements_2D,
+    vtk_measurements_3D,
     vtk_voxelizer,
     vtk_is_mesh_closed,
     vtk_is_mesh_manifold,
     vtk_meshes_bbox_sitk_image,
 )
-
-is_mask_empty = lambda mask: not np.any(mask.astype(bool))
 
 
 class DistanceMetrics:
@@ -397,16 +395,15 @@ class DistanceMetrics:
         if self.ref_is_empty or self.pred_is_empty:
             return None
         elif self.n_dim == 2:
-            d_ref2pred, b_ref, d_pred2ref, b_pred = vtk_centroids2contour_measurements(
+            d_ref2pred, b_ref, d_pred2ref, b_pred = vtk_measurements_2D(
                 ref_contour=self.ref_vtk,
                 pred_contour=self.pred_vtk,
-                subdivide_iter=5,
+                # subdivide_iter=5,
             )
         elif self.n_dim == 3:
-            d_ref2pred, b_ref, d_pred2ref, b_pred = vtk_centroids2surface_measurements(
+            d_ref2pred, b_ref, d_pred2ref, b_pred = vtk_measurements_3D(
                 ref_mesh=self.ref_vtk,
                 pred_mesh=self.pred_vtk,
-                subdivide_iter=0,
             )
         else:
             raise ValueError("Only 2D and 3D masks are supported")
@@ -558,3 +555,36 @@ class DistanceMetrics:
             intersection = np.logical_and(self.ref_np, self.pred_np).sum()
             union = np.logical_or(self.ref_np, self.pred_np).sum()
             return 2 * intersection / (union + intersection)
+
+
+## test
+if __name__ == "__main__":
+    from .utils import create_synthetic_examples_2d
+
+    # Create synthetic examples
+    vtk_mesh1, vtk_mesh2, sitk_mask1, sitk_mask2 = create_synthetic_examples_2d(
+        r1=5.0, r2=10.0, spacing=(1.0, 1.0, 1.0)
+    )
+
+    # Initialize distance metrics class
+    tau = 2.0  # tolerance for NSD and BIoU
+    dist_metrics = DistanceMetrics()
+
+    ## 2D example
+    dist_metrics.set_input(sitk_mask1, sitk_mask2)
+    # Hausdorff Distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
+    hd100 = dist_metrics.hd()
+    # 95th percentile HD
+    hd95 = dist_metrics.hd(percentile=95)
+    # Mean Average Surface Distance (MASD)
+    masd = dist_metrics.masd()
+    # Average Symmetric Surface Distance (ASSD)
+    assd = dist_metrics.assd()
+    # Normalized Surface Distance (NSD) with tau
+    nsd2 = dist_metrics.nsd(tau=tau)
+    # Boundary Intersection over Union (BIoU) with tau
+    biou2 = dist_metrics.biou(tau=tau)
+    # print results
+    print(
+        f"HD100: {hd100:.2f} mm, HD (perc=95): {hd95:.2f} mm, MASD: {masd:.2f} mm, ASSD: {assd:.2f} mm, NSD (tau={tau} mm): {nsd2*100:.2f} %, BIoU (tau={tau} mm): {biou2*100:.2f} %"
+    )
