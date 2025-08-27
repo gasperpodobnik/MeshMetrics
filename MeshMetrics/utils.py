@@ -23,12 +23,13 @@ def sitk2np(sitk_img: sitk.Image) -> np.ndarray:
     return np.swapaxes(sitk.GetArrayFromImage(sitk_img), 0, -1)
 
 
-def sitk_add_axis(img_sitk_2d: sitk.Image, thickness: float) -> sitk.Image:
-    ref_np_3d = sitk2np(img_sitk_2d)[..., np.newaxis]
-    spacing = (*img_sitk_2d.GetSpacing(), thickness)
-    img_sitk_3d = np2sitk(ref_np_3d, spacing=spacing)
-    img_sitk_3d.SetOrigin((*img_sitk_2d.GetOrigin(), 0.0))
-    return img_sitk_3d
+def sitk_add_axis_to_end(sitk_img: sitk.Image) -> sitk.Image:
+    """Adds a new axis as the last dimension to a SimpleITK image.
+    
+    Note:
+        The new spacing element is set to 1.0, and 0.0 is appended to the origin.
+    """    
+    return sitk.JoinSeries([sitk_img])
 
 
 def to_sitk(img: Union[str, Path, sitk.Image]) -> sitk.Image:
@@ -120,7 +121,7 @@ def vtk_is_mesh_manifold(polydata):
     return boundary_edges == 0
 
 
-def vtk_2D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
+def vtk_2D_meshing(src_img: Union[str, Path, sitk.Image], pad: bool = True) -> vtk.vtkPolyData:
     src_img = to_sitk(src_img)
 
     n_dim = src_img.GetDimension()
@@ -129,8 +130,13 @@ def vtk_2D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
     if sitk.GetArrayFromImage(src_img).sum() == 0:
         return vtk.vtkPolyData()
 
+    # pad to avoid potential open boundary related issues
+    if pad:
+        src_img = sitk.ConstantPad(src_img, (1, 1), (1, 1), 0)
+
     vtkImage = sitk2vtk(src_img > 0)
 
+    # segmentation maks --> contour (mesh):
     vtk.vtkLogger.SetStderrVerbosity(vtk.vtkLogger.VERBOSITY_OFF)
     meshing_alg = vtk.vtkSurfaceNets2D()
     meshing_alg.SmoothingOff()
@@ -141,7 +147,7 @@ def vtk_2D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
     return mesh
 
 
-def vtk_3D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
+def vtk_3D_meshing(src_img: Union[str, Path, sitk.Image], pad: bool = True) -> vtk.vtkPolyData:
     src_img = to_sitk(src_img)
 
     n_dim = src_img.GetDimension()
@@ -149,12 +155,14 @@ def vtk_3D_meshing(src_img: Union[str, Path, sitk.Image]) -> vtk.vtkPolyData:
 
     if sitk.GetArrayViewFromImage(src_img).sum() == 0:
         return vtk.vtkPolyData()
+    
+    # pad to avoid potential open boundary related issues
+    if pad:
+        src_img = sitk.ConstantPad(src_img, (1, 1, 1), (1, 1, 1), 0)
 
-    # vtkDiscreteMarchingCubes normals point inward by default, so we invert the image
-    vtkImage = sitk2vtk(src_img)
+    vtkImage = sitk2vtk(src_img > 0)
 
-    # segmentation --> polygonal data:
-
+    # segmentation maks --> surface (mesh):
     vtk.vtkLogger.SetStderrVerbosity(vtk.vtkLogger.VERBOSITY_OFF)
     meshing_alg = vtk.vtkSurfaceNets3D()
     meshing_alg.SmoothingOff()
@@ -177,51 +185,6 @@ def vtk_meshing(src_img: Union[str, Path, sitk.Image]):
     else:
         raise ValueError("Only 2D or 3D images are supported")
     return mesh
-
-
-def vtkLinearSubdividePolyline(polyline: vtk.vtkPolyData) -> vtk.vtkPolyData:
-
-    points = polyline.GetPoints()
-    lines = polyline.GetLines()
-
-    # Create new points and connectivity for the subdivided polyline
-    new_points = vtk.vtkPoints()
-    new_lines = vtk.vtkCellArray()
-
-    # Traverse the original polyline and add midpoints
-    lines.InitTraversal()
-    id_list = vtk.vtkIdList()
-    while lines.GetNextCell(id_list):
-        for i in range(id_list.GetNumberOfIds() - 1):
-            # Get the two endpoints of the current segment
-            p0 = np.array(points.GetPoint(id_list.GetId(i)))
-            p1 = np.array(points.GetPoint(id_list.GetId(i + 1)))
-
-            # Add the first endpoint to the new points
-            id0 = new_points.InsertNextPoint(p0)
-
-            # Compute and add the midpoint
-            midpoint = (p0 + p1) / 2
-            id_mid = new_points.InsertNextPoint(midpoint)
-
-            # Add two new line segments
-            new_lines.InsertNextCell(2)
-            new_lines.InsertCellPoint(id0)
-            new_lines.InsertCellPoint(id_mid)
-
-        # Add the last point of the segment
-        id_last = new_points.InsertNextPoint(
-            points.GetPoint(id_list.GetId(id_list.GetNumberOfIds() - 1))
-        )
-        new_lines.InsertNextCell(2)
-        new_lines.InsertCellPoint(id_mid)
-        new_lines.InsertCellPoint(id_last)
-
-    # Create a new polyline with subdivided segments
-    subdivided_polyline = vtk.vtkPolyData()
-    subdivided_polyline.SetPoints(new_points)
-    subdivided_polyline.SetLines(new_lines)
-    return subdivided_polyline
 
 
 def vtk_2D_centroid2surface_dist_length(
@@ -266,127 +229,45 @@ def sort_dists_and_bsizes(dists, boundary_sizes) -> Tuple[np.ndarray, np.ndarray
     return dists_s, boundary_sizes_s
 
 
-def vtk_create_surface_from_polydata(
-    polydata: vtk.vtkPolyData, z_offset: float
-) -> vtk.vtkPolyData:
-    """
-    Create surfaces from multiple non-connected polylines within a vtkPolyData object.
-    The function explicitly follows edges to ensure proper traversal.
-    """
-
-    z_coord = vtk_to_numpy(polydata.GetPoints().GetData())[:, -1]
-    assert np.all(z_coord[0] == z_coord), "Polyline must be planar in the z-direction"
-
-    # Ensure the input contains lines
-    if polydata.GetNumberOfLines() == 0:
-        raise ValueError("Input vtkPolyData must contain lines.")
-
-    # Data structures to store results
-    combined_points = vtk.vtkPoints()
-    combined_cells = vtk.vtkCellArray()
-
-    # Get points and lines from the polydata
-    points = polydata.GetPoints()
-    lines = polydata.GetLines()
-
-    # Data structure to track visited lines
-    visited_lines = set()
-
-    # Traverse each polyline
-    lines.InitTraversal()
-    for line_id in range(lines.GetNumberOfCells()):
-        if line_id in visited_lines:
-            continue
-
-        # Retrieve the current polyline
-        line = vtk.vtkIdList()
-        lines.GetNextCell(line)
-        visited_lines.add(line_id)
-
-        # Follow edges to construct the polyline
-        polyline_points = []
-        for point_id in range(line.GetNumberOfIds()):
-            polyline_points.append(line.GetId(point_id))
-
-        # Offset polyline in the Z-direction
-        num_points = len(polyline_points)
-
-        # lower and upper points
-        pts_l = vtk.vtkPoints()
-        pts_u = vtk.vtkPoints()
-        for pid in polyline_points:
-            x, y, z = points.GetPoint(pid)
-            pts_l.InsertNextPoint(x, y, z - z_offset)
-            pts_u.InsertNextPoint(x, y, z + z_offset)
-
-        # Add the points from both offsets to the combined mesh
-        offset = combined_points.GetNumberOfPoints()
-        for i in range(num_points):
-            combined_points.InsertNextPoint(pts_l.GetPoint(i))
-        for i in range(num_points):
-            combined_points.InsertNextPoint(pts_u.GetPoint(i))
-
-        # Create triangles between the two polylines
-        stp = 1 if num_points == 2 else 0
-        for i in range(num_points - stp):
-            l0 = offset + i  # Point from polyline1
-            l1 = offset + (i + 1) % num_points  # Next point from polyline1
-            u0 = l0 + num_points  # Corresponding point from polyline2
-            u1 = l1 + num_points  # Next point from polyline2
-
-            # Add the two triangles forming the quadrilateral
-            triangle1 = vtk.vtkTriangle()
-            triangle1.GetPointIds().SetId(0, l0)
-            triangle1.GetPointIds().SetId(1, u0)
-            triangle1.GetPointIds().SetId(2, l1)
-
-            triangle2 = vtk.vtkTriangle()
-            triangle2.GetPointIds().SetId(0, l1)
-            triangle2.GetPointIds().SetId(1, u0)
-            triangle2.GetPointIds().SetId(2, u1)
-
-            combined_cells.InsertNextCell(triangle1)
-            combined_cells.InsertNextCell(triangle2)
-
-    # Finalize the combined mesh
-    output_polydata = vtk.vtkPolyData()
-    output_polydata.SetPoints(combined_points)
-    output_polydata.SetPolys(combined_cells)
-
-    return output_polydata
-
-
 def vtk_measurements_2D(
     ref_contour: vtk.vtkPolyData,
     pred_contour: vtk.vtkPolyData,
+    ref_sitk: sitk.Image,
+    pred_sitk: sitk.Image,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Calculate distances between centroids of polylines and the opposite polyline.
-    Function calculates in both directions and also returns the length of line segments.
+    """Compute bidirectional distances between contour centroids and the opposing surface.
 
-    Note: Because vtk.vtkImplicitPolyDataDistance only works for 3D vtkPolyData (i.e. meshes),
-    we use a trick to create a 3D surface mesh from a polyline by sticking together two polylines with a small offset in the z-direction.
+    This function measures distances from the centroids of one contour (reference or
+    prediction) to the surface generated from the opposing contour. Distances are computed
+    in both directions (ref→pred and pred→ref), along with the lengths of the corresponding
+    line segments. Distances and the corresponding segment lengths are then sorted.
+
+    Note:
+        Since `vtk.vtkImplicitPolyDataDistance` requires a 3D `vtkPolyData`, the input
+        2D `sitk.Image` contours are lifted into 3D by adding a singleton axis and then
+        meshed into open 3D surfaces.
 
     Args:
-        ref_contour (vtk.vtkPolyData): _description_
-        ref_surface (vtk.vtkPolyData): _description_
-        pred_contour (vtk.vtkPolyData): _description_
-        pred_surface (vtk.vtkPolyData): _description_
-        subdivide_iter (int, optional): _description_. Defaults to None.
+        ref_contour (vtk.vtkPolyData): Contour created from reference segmentation.
+        pred_contour (vtk.vtkPolyData): Contour created from predicted segmentation.
+        ref_sitk (SimpleITK.Image): Reference segmentation mask.
+        pred_sitk (SimpleITK.Image): Predicted segmentation mask.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: (numpy vector of distances between ref mesh vertices and pred mesh surface, numpy vector of distances between pred mesh vertices and ref mesh surface)
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: numpy vector with distances from ref to pred mesh and ref segment lengths, and vice-versa
     """
 
-    ref_surface = vtk_create_surface_from_polydata(ref_contour, z_offset=1)
-    pred_surface = vtk_create_surface_from_polydata(pred_contour, z_offset=1)
-
-    # fmt: off
+    # lift 2D contours into 3D by adding a singleton axis and mesh into open surfaces
+    ref_sitk_3D, pred_sitk_3D = sitk_add_axis_to_end(ref_sitk), sitk_add_axis_to_end(pred_sitk)
+    ref_surface, pred_surface = vtk_3D_meshing(ref_sitk_3D, pad=False), vtk_3D_meshing(pred_sitk_3D, pad=False)
+    
+    # compute distances between contour centroids and opposing surface
     dists_ref2pred, segment_lengths_ref = vtk_2D_centroid2surface_dist_length(ref_contour, pred_surface)
     dists_pred2ref, segment_lengths_pred = vtk_2D_centroid2surface_dist_length(pred_contour, ref_surface)    
+    
     # sort distances and boundary sizes
     dists_ref2pred, segment_lengths_ref = sort_dists_and_bsizes(dists_ref2pred, segment_lengths_ref)
     dists_pred2ref, segment_lengths_pred = sort_dists_and_bsizes(dists_pred2ref, segment_lengths_pred)
-    # fmt: on
 
     return dists_ref2pred, segment_lengths_ref, dists_pred2ref, segment_lengths_pred
 
@@ -411,17 +292,22 @@ def vtk_measurements_3D(
     ref_mesh: vtk.vtkPolyData,
     pred_mesh: vtk.vtkPolyData,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Calculate distances between centroids of triangles and surface represented by the mesh.
-    Function calculates in both directions and also returns the areas of surface elements (surfels).
+    """Compute bidirectional distances between triangle centroids and the opposing surface.
+
+    This function measures distances from the centroids of one mesh (reference or
+    prediction) to the opposing mesh. Distances are computed in both directions 
+    (ref→pred and pred→ref), along with the areas of the corresponding
+    surface elements (surfels). Distances and the corresponding surfel areas are then sorted.
 
     Args:
-        ref_mesh (vtk.vtkPolyData): Mesh created from reference segmentation
-        pred_mesh (vtk.vtkPolyData): Mesh created from predicted segmentation
+        ref_mesh (vtk.vtkPolyData): Mesh created from reference segmentation.
+        pred_mesh (vtk.vtkPolyData): Mesh created from predicted segmentation.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: numpy vector with distances from ref to pred mesh and ref boundary sizes, and vice-versa
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: numpy vector with distances from ref to pred mesh and ref surfel areas, and vice-versa
     """
 
+    # compute distances between triangle centroids and opposing surface
     vtk_p2v_dist = vtk.vtkDistancePolyDataFilter()
     vtk_p2v_dist.SetInputData(0, ref_mesh)
     vtk_p2v_dist.SetInputData(1, pred_mesh)
@@ -435,10 +321,12 @@ def vtk_measurements_3D(
     dists_pred2ref = vtk_to_numpy(
         vtk_p2v_dist.GetSecondDistanceOutput().GetCellData().GetArray("Distance")
     )
+    
+    # compute surfel areas
     surfel_areas_ref = vtk_compute_cell_sizes(ref_mesh)
     surfel_areas_pred = vtk_compute_cell_sizes(pred_mesh)
 
-    # sort distances and boundary sizes
+    # sort distances and surfel areas
     dists_ref2pred, surfel_areas_ref = sort_dists_and_bsizes(
         dists_ref2pred, surfel_areas_ref
     )
