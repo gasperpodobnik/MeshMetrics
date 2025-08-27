@@ -11,6 +11,7 @@ from .utils import (
     sitk2np,
     vtk_measurements_2D,
     vtk_measurements_3D,
+    vtk_distance_field,
     vtk_voxelizer,
     vtk_is_mesh_closed,
     vtk_is_mesh_manifold,
@@ -413,33 +414,14 @@ class DistanceMetrics:
 
     @property
     @lru_cache
-    def img_dist_field(self) -> Tuple[np.ndarray, np.ndarray]:
-        # crop the masks to the bounding box
-        union_sitk = (self.ref_sitk + self.pred_sitk) > 0
-        label_filter = sitk.LabelStatisticsImageFilter()
-        label_filter.Execute(union_sitk, union_sitk)
-
-        if self.n_dim == 2:
-            # 2D case, we need to get the bounding box for the first label
-            xmin, xmax, ymin, ymax = label_filter.GetBoundingBox(1)
-            ref_bbox_sitk = self.ref_sitk[xmin : xmax + 1, ymin : ymax + 1]
-            pred_bbox_sitk = self.pred_sitk[xmin : xmax + 1, ymin : ymax + 1]
-        else:
-            xmin, xmax, ymin, ymax, zmin, zmax = label_filter.GetBoundingBox(1)
-            ref_bbox_sitk = self.ref_sitk[
-                xmin : xmax + 1, ymin : ymax + 1, zmin : zmax + 1
-            ]
-            pred_bbox_sitk = self.pred_sitk[
-                xmin : xmax + 1, ymin : ymax + 1, zmin : zmax + 1
-            ]
-
-        edt_sitk = sitk.SignedMaurerDistanceMapImageFilter()
-        edt_sitk.SquaredDistanceOff()
-        edt_sitk.SetInsideIsPositive(True)
-        edt_sitk.SetUseImageSpacing(True)
-        ref_dist_field = edt_sitk.Execute(ref_bbox_sitk)
-        pred_dist_field = edt_sitk.Execute(pred_bbox_sitk)
-        return sitk2np(ref_dist_field), sitk2np(pred_dist_field)
+    def img_dist_field(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        ref_dist_field_np, pred_dist_field_np = vtk_distance_field(
+            ref_mesh=self.ref_vtk,
+            pred_mesh=self.pred_vtk,
+            ref_sitk=self.ref_sitk,
+            pred_sitk=self.pred_sitk,
+        )
+        return self.ref_np, ref_dist_field_np, self.pred_np, pred_dist_field_np
 
     @staticmethod
     def perc_surface_dist(dists, b_sizes, perc) -> float:
@@ -531,10 +513,10 @@ class DistanceMetrics:
             logging.warning("One of the masks is empty")
             return 0
         else:
-            ref_dist_field_np, pred_dist_field_np = self.img_dist_field
+            ref_bbox_np, ref_dist_field_np, pred_bbox_np, pred_dist_field_np = self.img_dist_field
 
-            ref_hollow = (ref_dist_field_np < tau) & (ref_dist_field_np >= 0)
-            pred_hollow = (pred_dist_field_np < tau) & (pred_dist_field_np >= 0)
+            ref_hollow = (ref_dist_field_np < tau) & ref_bbox_np.astype(bool)
+            pred_hollow = (pred_dist_field_np < tau) & pred_bbox_np.astype(bool)
 
             num = (ref_hollow & pred_hollow).sum()
             denom = (ref_hollow | pred_hollow).sum()

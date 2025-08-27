@@ -336,6 +336,46 @@ def vtk_measurements_3D(
 
     return dists_ref2pred, surfel_areas_ref, dists_pred2ref, surfel_areas_pred
 
+def index2world(inds: np.ndarray, spacing: np.ndarray, origin: np.ndarray, direction: np.ndarray) -> np.ndarray:
+    return (inds * spacing + origin) @ direction.T
+
+def compute_distance_field(pts_np: np.ndarray, mesh_vtk: vtk.vtkPolyData):
+    vtk_p2s_dist = vtk.vtkImplicitPolyDataDistance()
+    vtk_p2s_dist.SetInput(mesh_vtk)
+    return np.array([abs(vtk_p2s_dist.FunctionValue(pt)) for pt in pts_np])
+
+def vtk_distance_field(
+    ref_mesh: vtk.vtkPolyData,
+    pred_mesh: vtk.vtkPolyData,
+    ref_sitk: sitk.Image,
+    pred_sitk: sitk.Image,
+) -> Tuple[np.ndarray, np.ndarray]:
+    
+    n_dim = ref_sitk.GetDimension()
+    spacing = np.array(ref_sitk.GetSpacing())
+    origin = np.array(ref_sitk.GetOrigin())
+    direction = np.array(ref_sitk.GetDirection()).reshape(n_dim, n_dim)
+    
+    ref_np = sitk2np(ref_sitk)
+    pred_np = sitk2np(pred_sitk)
+    ref_world = index2world(np.stack(np.nonzero(ref_np), axis=1), spacing, origin, direction)
+    pred_world = index2world(np.stack(np.nonzero(pred_np), axis=1), spacing, origin, direction)
+    
+    if n_dim == 2:
+        ref_world = np.concatenate([ref_world, np.zeros((ref_world.shape[0], 1))], axis=1)
+        pred_world = np.concatenate([pred_world, np.zeros((pred_world.shape[0], 1))], axis=1)
+        
+        ref_sitk_3D, pred_sitk_3D = sitk_add_axis_to_end(ref_sitk), sitk_add_axis_to_end(pred_sitk)
+        ref_surface, pred_surface = vtk_3D_meshing(ref_sitk_3D, pad=False), vtk_3D_meshing(pred_sitk_3D, pad=False)
+    else:
+        ref_surface, pred_surface = ref_mesh, pred_mesh
+        
+    ref_dist_field = np.copy(ref_np).astype(np.float32)
+    ref_dist_field[ref_dist_field > 0] = compute_distance_field(ref_world, ref_surface)
+    pred_dist_field = np.copy(pred_np).astype(np.float32)
+    pred_dist_field[pred_dist_field > 0] = compute_distance_field(pred_world, pred_surface)
+    return ref_dist_field, pred_dist_field
+    
 
 def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
     assert isinstance(mesh_vtk, vtk.vtkPolyData), "Mesh must be vtkPolyData"
