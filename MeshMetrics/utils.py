@@ -350,18 +350,48 @@ def vtk_distance_field(
     ref_sitk: sitk.Image,
     pred_sitk: sitk.Image,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute voxel-wise distance fields between binary segmentation masks and their corresponding surfaces.
+
+    For each foreground voxel in the reference and prediction masks, the function computes the
+    shortest distance (in world coordinates) to the corresponding surface mesh. The output is
+    two distance fields aligned with the input images, where distance values are only assigned
+    inside the foreground region.
+
+    Notes:
+        - Works for both 2D and 3D segmentations. In 2D, an artificial third axis (z=0) is added,
+          and the segmentation is extruded into 3D for surface meshing.
+        - Distances are computed in physical space using image spacing, origin, and direction.
+
+    Args:
+        ref_mesh (vtk.vtkPolyData):
+            Surface mesh corresponding to the reference segmentation (used for 3D inputs).
+        pred_mesh (vtk.vtkPolyData):
+            Surface mesh corresponding to the predicted segmentation (used for 3D inputs).
+        ref_sitk (sitk.Image):
+            Reference segmentation as a SimpleITK image (binary mask).
+        pred_sitk (sitk.Image):
+            Predicted segmentation as a SimpleITK image (binary mask).
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]:
+            - ref_dist_field (np.ndarray): Distance values for each foreground voxel in the
+              reference segmentation relative to the reference surface.
+            - pred_dist_field (np.ndarray): Distance values for each foreground voxel in the
+              predicted segmentation relative to the predicted surface.
+    """
     
     n_dim = ref_sitk.GetDimension()
     spacing = np.array(ref_sitk.GetSpacing())
     origin = np.array(ref_sitk.GetOrigin())
     direction = np.array(ref_sitk.GetDirection()).reshape(n_dim, n_dim)
     
-    ref_np = sitk2np(ref_sitk)
-    pred_np = sitk2np(pred_sitk)
+    # get foreground pixel/voxel coordinates in world space
+    ref_np, pred_np = sitk2np(ref_sitk), sitk2np(pred_sitk)
     ref_world = index2world(np.stack(np.nonzero(ref_np), axis=1), spacing, origin, direction)
     pred_world = index2world(np.stack(np.nonzero(pred_np), axis=1), spacing, origin, direction)
     
     if n_dim == 2:
+        # add z axis with 0 values
         ref_world = np.concatenate([ref_world, np.zeros((ref_world.shape[0], 1))], axis=1)
         pred_world = np.concatenate([pred_world, np.zeros((pred_world.shape[0], 1))], axis=1)
         
@@ -370,9 +400,9 @@ def vtk_distance_field(
     else:
         ref_surface, pred_surface = ref_mesh, pred_mesh
         
-    ref_dist_field = np.copy(ref_np).astype(np.float32)
+    # initialize distance fields with zeros, then compute distances only for foreground pixels/voxels
+    ref_dist_field, pred_dist_field = np.copy(ref_np).astype(np.float32), np.copy(pred_np).astype(np.float32)
     ref_dist_field[ref_dist_field > 0] = compute_distance_field(ref_world, ref_surface)
-    pred_dist_field = np.copy(pred_np).astype(np.float32)
     pred_dist_field[pred_dist_field > 0] = compute_distance_field(pred_world, pred_surface)
     return ref_dist_field, pred_dist_field
     
