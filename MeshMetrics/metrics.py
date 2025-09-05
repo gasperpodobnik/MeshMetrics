@@ -1,5 +1,5 @@
 from functools import lru_cache
-import logging
+import warnings
 from typing import Tuple, Union
 
 import numpy as np
@@ -20,7 +20,10 @@ from .utils import (
 
 
 class DistanceMetrics:
-    def __init__(self):
+    def __init__(self, verbose: bool = True):
+        self.verbose = verbose
+
+        # internal variables
         self._ref_np = None
         self._pred_np = None
         self._spacing = None
@@ -38,7 +41,7 @@ class DistanceMetrics:
         spacing: Union[tuple, list, np.ndarray] = None,
     ):
         """General input setter method that automatically detects the input type.
-        
+
         Note:
             - If `ref` is numpy array, the `pred` must also be numpy array and vice versa. Also spacing must be set.
             This is to avoid potential issues with different spatial positions of segmentation masks
@@ -436,34 +439,36 @@ class DistanceMetrics:
         Reference:
             https://archive.org/details/grundzgedermen00hausuoft/
             https://doi.org/10.1109/34.232073
-            
+
         HDp is a non-parametric absolute metric that measures the maximum of the
         directed p-th percentile surface distances between two binary segmentation masks.
-        
+
         Note:
             - `percentile = 100` corresponds to the classic Hausdorff distance.
             - `percentile = 95` (HD95) is widely used in medical image analysis
             to reduce sensitivity to outliers and noise.
-            - Different percentiles can be chosen depending on the application
+            - Arbitrary percentile can be chosen depending on the application
             and the desired robustness.
 
         Args:
-            percentile (float): The percentile of the surface distance distribution 
-                                to compute. Must be between 0 and 100. 
+            percentile (float): The percentile of the surface distance distribution
+                                to compute. Must be between 0 and 100.
                                 Default is 100 (classic Hausdorff distance).
 
         Returns:
             float: The HDp value in [0, inf) in the same physical units as the input (e.g. mm).
-            Returns NaN if both masks are empty, and 0 if only one mask is empty.
+            Returns 0.0 if both masks are empty, and inf if only one mask is empty.
         """
-        
+
         assert 0 <= percentile <= 100, "percentile must be between 0 and 100"
 
         if self.ref_is_empty and self.pred_is_empty:
-            logging.warning("Both masks are empty")
-            return np.nan
+            if self.verbose:
+                warnings.warn("Both masks are empty")
+            return 0.0
         elif self.ref_is_empty or self.pred_is_empty:
-            logging.warning("One of the masks is empty")
+            if self.verbose:
+                warnings.warn("One of the masks is empty")
             return np.inf
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
@@ -481,20 +486,22 @@ class DistanceMetrics:
 
         Reference:
             https://doi.org/10.1109/TMI.2005.851757
-            
-        MASD is a non-parametric absolute metric that measures the mean of the average 
+
+        MASD is a non-parametric absolute metric that measures the mean of the average
         directional surface distance between two binary segmentation masks.
 
         Returns:
             float: The MASD value in [0, inf) in the same physical units as the input (e.g. mm).
-            Returns NaN if both masks are empty, and 0 if only one mask is empty.
+            Returns 0.0 if both masks are empty, and inf if only one mask is empty.
         """
-        
+
         if self.ref_is_empty and self.pred_is_empty:
-            logging.warning("Both masks are empty")
-            return np.nan
+            if self.verbose:
+                warnings.warn("Both masks are empty")
+            return 0.0
         elif self.ref_is_empty or self.pred_is_empty:
-            logging.warning("One of the masks is empty")
+            if self.verbose:
+                warnings.warn("One of the masks is empty")
             return np.inf
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
@@ -507,20 +514,22 @@ class DistanceMetrics:
 
         Reference:
             https://webdoc.sub.gwdg.de/ebook/serien/ah/reports/zib/zib2004/paperweb/reports/ZR-04-09.pdf
-            
-        ASSD is a non-parametric absolute metric that measures the mean bidirectional 
+
+        ASSD is a non-parametric absolute metric that measures the mean bidirectional
         surface distance between two binary segmentation masks.
 
         Returns:
             float: The ASSD value in [0, inf) in the same physical units as the input (e.g. mm).
-            Returns NaN if both masks are empty, and 0 if only one mask is empty.
+            Returns 0.0 if both masks are empty, and inf if only one mask is empty.
         """
-        
+
         if self.ref_is_empty and self.pred_is_empty:
-            logging.warning("Both masks are empty")
-            return np.nan
+            if self.verbose:
+                warnings.warn("Both masks are empty")
+            return 0.0
         elif self.ref_is_empty or self.pred_is_empty:
-            logging.warning("One of the masks is empty")
+            if self.verbose:
+                warnings.warn("One of the masks is empty")
             return np.inf
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
@@ -535,34 +544,36 @@ class DistanceMetrics:
 
         Reference:
             https://doi.org/10.2196/26151
-            
-        NSD is a parametric relative metric that quantifies the agreement between two binary 
-        masks by evaluating the proportion of surface points that lie within 
+
+        NSD is a parametric relative metric that quantifies the agreement between two binary
+        masks by evaluating the proportion of surface points that lie within
         a specified tolerance distance.
 
         Note:
-            - The choice of `tau` is application-specific and should reflect the 
-            maximum acceptable distance error for the task at hand. 
-            - At coarse image resolutions, quantization effects can occur when 
+            - The choice of `tau` is application-specific and should reflect the
+            maximum acceptable distance error for the task at hand.
+            - At coarse image resolutions, quantization effects can occur when
             voxel size is comparable to or larger than `tau`.
 
         Args:
-            tau (float): Distance tolerance for defining the tolerance region. 
+            tau (float): Distance tolerance for defining the tolerance region.
                          Must be greater or equal than zero.
 
         Returns:
-            float: The NSD score in [0, 1]. Returns NaN if both masks are empty, 
-            and 0 if only one mask is empty.
+            float: The NSD score in [0, 1].
+            Returns 1.0 if both masks are empty, and 0 if only one mask is empty.
         """
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau >= 0, "tolerance must be greater than or equal to zero"
 
         if self.ref_is_empty and self.pred_is_empty:
-            logging.warning("Both masks are empty")
-            return np.nan
+            if self.verbose:
+                warnings.warn("Both masks are empty")
+            return 1.0
         elif self.ref_is_empty or self.pred_is_empty:
-            logging.warning("One of the masks is empty")
-            return 0
+            if self.verbose:
+                warnings.warn("One of the masks is empty")
+            return 0.0
         else:
             d_ref2pred, b_ref, d_pred2ref, b_pred = self.distances
             overlap_ref = b_ref[np.abs(d_ref2pred) <= tau].sum()
@@ -576,40 +587,44 @@ class DistanceMetrics:
 
         Reference:
             https://doi.org/10.1109/CVPR46437.2021.01508
-            
-        BIoU is a parametric relative metric that measures the overlap between 
-        the boundary regions of two binary masks, and thus improves sensitivity 
+
+        BIoU is a parametric relative metric that measures the overlap between
+        the boundary regions of two binary masks, and thus improves sensitivity
         of the well-known IoU metric to the boundary deviations.
-        
+
         Note:
-            - This metric is computed using a hybrid mesh-grid approach: 
-            the grid provides the representation, while precise distances 
-            to the mesh surface are used for calculations. This is because 
-            mesh thinning and boolean operations on meshes are not robustly 
+            - This metric is computed using a hybrid mesh-grid approach:
+            the grid provides the representation, while precise distances
+            to the mesh surface are used for calculations. This is because
+            mesh thinning and boolean operations on meshes are not robustly
             implemented (yet).
-            It actually serves as a good compromise, since BIoU itself is a hybrid 
+            It actually serves as a good compromise, since BIoU itself is a hybrid
             between overlap-based and distance-based metrics.
 
         Args:
-            tau (float): Distance tolerance for defining the boundary region. 
+            tau (float): Distance tolerance for defining the boundary region.
                          Must be greater than zero.
 
         Returns:
-            float: The BIoU score in [0, 1]. Returns NaN if both masks are empty, 
-            and 0 if only one mask is empty.
+            float: The BIoU score in [0, 1].
+            Returns 1.0 if both masks are empty, and 0.0 if only one mask is empty.
         """
 
         assert isinstance(tau, (int, float)), "tolerance must be a float"
         assert tau > 0, "tolerance must be greater than zero"
 
         if self.ref_is_empty and self.pred_is_empty:
-            logging.warning("Both masks are empty")
-            return np.nan
+            if self.verbose:
+                warnings.warn("Both masks are empty")
+            return 1.0
         elif self.ref_is_empty or self.pred_is_empty:
-            logging.warning("One of the masks is empty")
-            return 0
+            if self.verbose:
+                warnings.warn("One of the masks is empty")
+            return 0.0
         else:
-            ref_bbox_np, ref_dist_field_np, pred_bbox_np, pred_dist_field_np = self.img_dist_field
+            ref_bbox_np, ref_dist_field_np, pred_bbox_np, pred_dist_field_np = (
+                self.img_dist_field
+            )
 
             ref_hollow = (ref_dist_field_np < tau) & ref_bbox_np.astype(bool)
             pred_hollow = (pred_dist_field_np < tau) & pred_bbox_np.astype(bool)
@@ -625,31 +640,67 @@ class DistanceMetrics:
         Reference:
             https://doi.org/10.2307/1932409
 
-        DSC is a non-parametric relative metric that quantifies the overlap 
+        DSC is a non-parametric relative metric that quantifies the overlap
         between two binary masks.
 
         Note:
             - This function calculates DSC on a regular grid (voxel-based). If surface
             meshes are supplied instead of volumetric masks, they are first rasterized
             or voxelized before the DSC calculation - in such cases, the user must provide
-            the pixel/voxel spacing. This is because boolean operations 
+            the pixel/voxel spacing. This is because boolean operations
             on meshes are not robustly implemented (yet).
 
         Returns:
-            float: The DSC score in [0, 1]. Returns NaN if both masks are empty, 
-            and 0 if only one mask is empty.
+            float: The DSC score in [0, 1].
+            Returns 1.0 if both masks are empty, and 0.0 if only one mask is empty.
         """
 
         if self.ref_is_empty and self.pred_is_empty:
-            logging.warning("Both masks are empty")
-            return np.nan
+            if self.verbose:
+                warnings.warn("Both masks are empty")
+            return 1.0
         elif self.ref_is_empty or self.pred_is_empty:
-            logging.warning("One of the masks is empty")
-            return 0
+            if self.verbose:
+                warnings.warn("One of the masks is empty")
+            return 0.0
         else:
             intersection = np.logical_and(self.ref_np, self.pred_np).sum()
             union = np.logical_or(self.ref_np, self.pred_np).sum()
             return 2 * intersection / (union + intersection)
+
+    def iou(self) -> float:
+        """Intersection over Union (IoU).
+
+        Reference:
+            https://doi.org/10.1111/j.1469-8137.1912.tb05611.x
+
+        IoU is a non-parametric relative metric that quantifies the overlap
+        between two binary masks.
+
+        Note:
+            - This function calculates IoU on a regular grid (voxel-based). If surface
+            meshes are supplied instead of volumetric masks, they are first rasterized
+            or voxelized before the IoU calculation - in such cases, the user must provide
+            the pixel/voxel spacing. This is because boolean operations
+            on meshes are not robustly implemented (yet).
+
+        Returns:
+            float: The IoU score in [0, 1].
+            Returns 1.0 if both masks are empty, and 0.0 if only one mask is empty.
+        """
+
+        if self.ref_is_empty and self.pred_is_empty:
+            if self.verbose:
+                warnings.warn("Both masks are empty")
+            return 1.0
+        elif self.ref_is_empty or self.pred_is_empty:
+            if self.verbose:
+                warnings.warn("One of the masks is empty")
+            return 0.0
+        else:
+            intersection = np.logical_and(self.ref_np, self.pred_np).sum()
+            union = np.logical_or(self.ref_np, self.pred_np).sum()
+            return intersection / union
 
 
 ## test
@@ -661,25 +712,36 @@ if __name__ == "__main__":
         r1=5.0, r2=10.0, spacing=(1.0, 1.0, 1.0)
     )
 
-    # Initialize distance metrics class
+    # Set parameters
+    percentile = 95  # percentile for HD
     tau = 2.0  # tolerance for NSD and BIoU
-    dist_metrics = DistanceMetrics()
 
-    ## 2D example
-    dist_metrics.set_input(sitk_mask1, sitk_mask2)
-    # Hausdorff Distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
-    hd100 = dist_metrics.hd()
-    # 95th percentile HD
-    hd95 = dist_metrics.hd(percentile=95)
-    # Mean Average Surface Distance (MASD)
-    masd = dist_metrics.masd()
-    # Average Symmetric Surface Distance (ASSD)
-    assd = dist_metrics.assd()
-    # Normalized Surface Distance (NSD) with tau
-    nsd2 = dist_metrics.nsd(tau=tau)
-    # Boundary Intersection over Union (BIoU) with tau
-    biou2 = dist_metrics.biou(tau=tau)
-    # print results
-    print(
-        f"HD100: {hd100:.2f} mm, HD (perc=95): {hd95:.2f} mm, MASD: {masd:.2f} mm, ASSD: {assd:.2f} mm, NSD (tau={tau} mm): {nsd2*100:.2f} %, BIoU (tau={tau} mm): {biou2*100:.2f} %"
-    )
+    # Initialize distance metrics class
+    mesh_metrics = DistanceMetrics()
+
+    ## ----- example (2D) -----
+    mesh_metrics.set_input(sitk_mask1, sitk_mask2)
+    # store flags indicating empty masks
+    results = {
+        "ref_is_empty": mesh_metrics.ref_is_empty,
+        "pred_is_empty": mesh_metrics.pred_is_empty,
+    }
+    # Hausdorff distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
+    results["HD_100"] = mesh_metrics.hd()
+    # p-th percentile HD (HD_p)
+    results[f"HD_{percentile}"] = mesh_metrics.hd(percentile=percentile)
+    # Mean average surface distance (MASD)
+    results["MASD"] = mesh_metrics.masd()
+    # Average symmetric surface distance (ASSD)
+    results["ASSD"] = mesh_metrics.assd()
+    # Normalized surface distance (NSD) with tau
+    results[f"NSD_{tau}"] = mesh_metrics.nsd(tau=tau)
+    # Boundary intersection over union (BIoU) with tau
+    results[f"BIoU_{tau}"] = mesh_metrics.biou(tau=tau)
+
+    # print metric values
+    units = {"HD": "mm", "MASD": "mm", "ASSD": "mm", "NSD": "%", "BIoU": "%"}
+    for k, v in results.items():
+        unit = units.get(k.split("_")[0], "")
+        f = 100.0 if unit == "%" else 1.0
+        print(f"{k}: {v*f:.2f} {unit}")

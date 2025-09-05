@@ -25,10 +25,10 @@ def sitk2np(sitk_img: sitk.Image) -> np.ndarray:
 
 def sitk_add_axis_to_end(sitk_img: sitk.Image) -> sitk.Image:
     """Adds a new axis as the last dimension to a SimpleITK image.
-    
+
     Note:
         The new spacing element is set to 1.0, and 0.0 is appended to the origin.
-    """    
+    """
     return sitk.JoinSeries([sitk_img])
 
 
@@ -121,7 +121,9 @@ def vtk_is_mesh_manifold(polydata):
     return boundary_edges == 0
 
 
-def vtk_2D_meshing(src_img: Union[str, Path, sitk.Image], pad: bool = True) -> vtk.vtkPolyData:
+def vtk_2D_meshing(
+    src_img: Union[str, Path, sitk.Image], pad: bool = True
+) -> vtk.vtkPolyData:
     src_img = to_sitk(src_img)
 
     n_dim = src_img.GetDimension()
@@ -135,8 +137,6 @@ def vtk_2D_meshing(src_img: Union[str, Path, sitk.Image], pad: bool = True) -> v
         src_img = sitk.ConstantPad(src_img, (1, 1), (1, 1), 0)
 
     vtkImage = sitk2vtk(src_img > 0)
-
-    # segmentation maks --> contour (mesh):
     vtk.vtkLogger.SetStderrVerbosity(vtk.vtkLogger.VERBOSITY_OFF)
     meshing_alg = vtk.vtkSurfaceNets2D()
     meshing_alg.SmoothingOff()
@@ -147,7 +147,9 @@ def vtk_2D_meshing(src_img: Union[str, Path, sitk.Image], pad: bool = True) -> v
     return mesh
 
 
-def vtk_3D_meshing(src_img: Union[str, Path, sitk.Image], pad: bool = True) -> vtk.vtkPolyData:
+def vtk_3D_meshing(
+    src_img: Union[str, Path, sitk.Image], pad: bool = True
+) -> vtk.vtkPolyData:
     src_img = to_sitk(src_img)
 
     n_dim = src_img.GetDimension()
@@ -155,14 +157,12 @@ def vtk_3D_meshing(src_img: Union[str, Path, sitk.Image], pad: bool = True) -> v
 
     if sitk.GetArrayViewFromImage(src_img).sum() == 0:
         return vtk.vtkPolyData()
-    
+
     # pad to avoid potential open boundary related issues
     if pad:
         src_img = sitk.ConstantPad(src_img, (1, 1, 1), (1, 1, 1), 0)
 
     vtkImage = sitk2vtk(src_img > 0)
-
-    # segmentation maks --> surface (mesh):
     vtk.vtkLogger.SetStderrVerbosity(vtk.vtkLogger.VERBOSITY_OFF)
     meshing_alg = vtk.vtkSurfaceNets3D()
     meshing_alg.SmoothingOff()
@@ -254,30 +254,25 @@ def vtk_measurements_2D(
         pred_sitk (SimpleITK.Image): Predicted segmentation mask.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: numpy vector with distances from ref to pred mesh and ref segment lengths, and vice-versa
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: numpy vector with distances
+        from ref to pred mesh and ref segment lengths, and vice-versa
     """
-
+    # fmt: off
     # lift 2D contours into 3D by adding a singleton axis and mesh into open surfaces
     ref_sitk_3D, pred_sitk_3D = sitk_add_axis_to_end(ref_sitk), sitk_add_axis_to_end(pred_sitk)
+    # note that the surfaces should be created using surface nets
     ref_surface, pred_surface = vtk_3D_meshing(ref_sitk_3D, pad=False), vtk_3D_meshing(pred_sitk_3D, pad=False)
-    
+
     # compute distances between contour centroids and opposing surface
     dists_ref2pred, segment_lengths_ref = vtk_2D_centroid2surface_dist_length(ref_contour, pred_surface)
-    dists_pred2ref, segment_lengths_pred = vtk_2D_centroid2surface_dist_length(pred_contour, ref_surface)    
-    
+    dists_pred2ref, segment_lengths_pred = vtk_2D_centroid2surface_dist_length(pred_contour, ref_surface)
+
     # sort distances and boundary sizes
     dists_ref2pred, segment_lengths_ref = sort_dists_and_bsizes(dists_ref2pred, segment_lengths_ref)
     dists_pred2ref, segment_lengths_pred = sort_dists_and_bsizes(dists_pred2ref, segment_lengths_pred)
+    # fmt: on
 
     return dists_ref2pred, segment_lengths_ref, dists_pred2ref, segment_lengths_pred
-
-
-def vtk_subdivide_mesh(vtk_polydata: vtk.vtkPolyData) -> vtk.vtkPolyData:
-    # note: does not work for meshes created with `surface_nets`
-    vtk_subd = vtk.vtkLinearSubdivisionFilter()
-    vtk_subd.SetInputData(vtk_polydata)
-    vtk_subd.Update()
-    return vtk_subd.GetOutput()
 
 
 def vtk_compute_cell_sizes(mesh: vtk.vtkPolyData) -> np.ndarray:
@@ -295,7 +290,7 @@ def vtk_measurements_3D(
     """Compute bidirectional distances between triangle centroids and the opposing surface.
 
     This function measures distances from the centroids of one mesh (reference or
-    prediction) to the opposing mesh. Distances are computed in both directions 
+    prediction) to the opposing mesh. Distances are computed in both directions
     (ref→pred and pred→ref), along with the areas of the corresponding
     surface elements (surfels). Distances and the corresponding surfel areas are then sorted.
 
@@ -304,9 +299,10 @@ def vtk_measurements_3D(
         pred_mesh (vtk.vtkPolyData): Mesh created from predicted segmentation.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: numpy vector with distances from ref to pred mesh and ref surfel areas, and vice-versa
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: numpy vector with distances
+        from ref to pred mesh and ref surfel areas, and vice-versa
     """
-
+    # fmt: off
     # compute distances between triangle centroids and opposing surface
     vtk_p2v_dist = vtk.vtkDistancePolyDataFilter()
     vtk_p2v_dist.SetInputData(0, ref_mesh)
@@ -315,34 +311,32 @@ def vtk_measurements_3D(
     vtk_p2v_dist.ComputeCellCenterDistanceOn()
     vtk_p2v_dist.ComputeSecondDistanceOn()
     vtk_p2v_dist.Update()
-    dists_ref2pred = vtk_to_numpy(
-        vtk_p2v_dist.GetOutput().GetCellData().GetArray("Distance")
-    )
-    dists_pred2ref = vtk_to_numpy(
-        vtk_p2v_dist.GetSecondDistanceOutput().GetCellData().GetArray("Distance")
-    )
-    
+    dists_ref2pred = vtk_to_numpy(vtk_p2v_dist.GetOutput().GetCellData().GetArray("Distance"))
+    dists_pred2ref = vtk_to_numpy(vtk_p2v_dist.GetSecondDistanceOutput().GetCellData().GetArray("Distance"))
+
     # compute surfel areas
     surfel_areas_ref = vtk_compute_cell_sizes(ref_mesh)
     surfel_areas_pred = vtk_compute_cell_sizes(pred_mesh)
 
     # sort distances and surfel areas
-    dists_ref2pred, surfel_areas_ref = sort_dists_and_bsizes(
-        dists_ref2pred, surfel_areas_ref
-    )
-    dists_pred2ref, surfel_areas_pred = sort_dists_and_bsizes(
-        dists_pred2ref, surfel_areas_pred
-    )
+    dists_ref2pred, surfel_areas_ref = sort_dists_and_bsizes(dists_ref2pred, surfel_areas_ref)
+    dists_pred2ref, surfel_areas_pred = sort_dists_and_bsizes(dists_pred2ref, surfel_areas_pred)
+    # fmt: on
 
     return dists_ref2pred, surfel_areas_ref, dists_pred2ref, surfel_areas_pred
 
-def index2world(inds: np.ndarray, spacing: np.ndarray, origin: np.ndarray, direction: np.ndarray) -> np.ndarray:
+
+def index2world(
+    inds: np.ndarray, spacing: np.ndarray, origin: np.ndarray, direction: np.ndarray
+) -> np.ndarray:
     return (inds * spacing + origin) @ direction.T
+
 
 def compute_distance_field(pts_np: np.ndarray, mesh_vtk: vtk.vtkPolyData):
     vtk_p2s_dist = vtk.vtkImplicitPolyDataDistance()
     vtk_p2s_dist.SetInput(mesh_vtk)
     return np.array([abs(vtk_p2s_dist.FunctionValue(pt)) for pt in pts_np])
+
 
 def vtk_distance_field(
     ref_mesh: vtk.vtkPolyData,
@@ -379,33 +373,49 @@ def vtk_distance_field(
             - pred_dist_field (np.ndarray): Distance values for each foreground voxel in the
               predicted segmentation relative to the predicted surface.
     """
-    
+
     n_dim = ref_sitk.GetDimension()
     spacing = np.array(ref_sitk.GetSpacing())
     origin = np.array(ref_sitk.GetOrigin())
     direction = np.array(ref_sitk.GetDirection()).reshape(n_dim, n_dim)
-    
+
     # get foreground pixel/voxel coordinates in world space
     ref_np, pred_np = sitk2np(ref_sitk), sitk2np(pred_sitk)
-    ref_world = index2world(np.stack(np.nonzero(ref_np), axis=1), spacing, origin, direction)
-    pred_world = index2world(np.stack(np.nonzero(pred_np), axis=1), spacing, origin, direction)
-    
+    ref_world = index2world(
+        np.stack(np.nonzero(ref_np), axis=1), spacing, origin, direction
+    )
+    pred_world = index2world(
+        np.stack(np.nonzero(pred_np), axis=1), spacing, origin, direction
+    )
+
     if n_dim == 2:
         # add z axis with 0 values
-        ref_world = np.concatenate([ref_world, np.zeros((ref_world.shape[0], 1))], axis=1)
-        pred_world = np.concatenate([pred_world, np.zeros((pred_world.shape[0], 1))], axis=1)
-        
-        ref_sitk_3D, pred_sitk_3D = sitk_add_axis_to_end(ref_sitk), sitk_add_axis_to_end(pred_sitk)
-        ref_surface, pred_surface = vtk_3D_meshing(ref_sitk_3D, pad=False), vtk_3D_meshing(pred_sitk_3D, pad=False)
+        ref_world = np.concatenate(
+            [ref_world, np.zeros((ref_world.shape[0], 1))], axis=1
+        )
+        pred_world = np.concatenate(
+            [pred_world, np.zeros((pred_world.shape[0], 1))], axis=1
+        )
+
+        ref_sitk_3D, pred_sitk_3D = sitk_add_axis_to_end(
+            ref_sitk
+        ), sitk_add_axis_to_end(pred_sitk)
+        ref_surface, pred_surface = vtk_3D_meshing_sn(
+            ref_sitk_3D, pad=False
+        ), vtk_3D_meshing_sn(pred_sitk_3D, pad=False)
     else:
         ref_surface, pred_surface = ref_mesh, pred_mesh
-        
+
     # initialize distance fields with zeros, then compute distances only for foreground pixels/voxels
-    ref_dist_field, pred_dist_field = np.copy(ref_np).astype(np.float32), np.copy(pred_np).astype(np.float32)
+    ref_dist_field, pred_dist_field = np.copy(ref_np).astype(np.float32), np.copy(
+        pred_np
+    ).astype(np.float32)
     ref_dist_field[ref_dist_field > 0] = compute_distance_field(ref_world, ref_surface)
-    pred_dist_field[pred_dist_field > 0] = compute_distance_field(pred_world, pred_surface)
+    pred_dist_field[pred_dist_field > 0] = compute_distance_field(
+        pred_world, pred_surface
+    )
     return ref_dist_field, pred_dist_field
-    
+
 
 def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
     assert isinstance(mesh_vtk, vtk.vtkPolyData), "Mesh must be vtkPolyData"

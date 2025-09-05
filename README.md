@@ -53,21 +53,39 @@ dist_metrics = DistanceMetrics()
 ref_sitk = sitk.ReadImage(data_dir / "example_3d_ref_mask.nii.gz")
 pred_sitk = sitk.ReadImage(data_dir / "example_3d_pred_mask.nii.gz")
 
-# set input masks and spacing (only needed if both inputs are numpy arrays or vtk meshes)
-dist_metrics.set_input(ref=ref_sitk, pred=pred_sitk)
+# Set parameters
+percentile = 95  # percentile for HD
+tau = 2.0  # tolerance for NSD and BIoU
 
-# Hausdorff Distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
-hd100 = dist_metrics.hd()
-# 95th percentile HD
-hd95 = dist_metrics.hd(percentile=95)
-# Mean Average Surface Distance (MASD)
-masd = dist_metrics.masd()
-# Average Symmetric Surface Distance (ASSD)
-assd = dist_metrics.assd()
-# Normalized Surface Distance (NSD) with tau=2
-nsd2 = dist_metrics.nsd(tau=2)
-# Boundary Intersection over Union (BIoU) with tau=2
-biou2 = dist_metrics.biou(tau=2)
+# Initialize distance metrics class
+mesh_metrics = DistanceMetrics()
+
+## ----- example (2D) -----
+mesh_metrics.set_input(sitk_mask1, sitk_mask2)
+# store flags indicating empty masks
+results = {
+    "ref_is_empty": mesh_metrics.ref_is_empty,
+    "pred_is_empty": mesh_metrics.pred_is_empty,
+}
+# Hausdorff distance (HD), by default, HD percentile is set to 100 (equivalent to HD)
+results["HD_100"] = mesh_metrics.hd()
+# p-th percentile HD (HD_p)
+results[f"HD_{percentile}"] = mesh_metrics.hd(percentile=percentile)
+# Mean average surface distance (MASD)
+results["MASD"] = mesh_metrics.masd()
+# Average symmetric surface distance (ASSD)
+results["ASSD"] = mesh_metrics.assd()
+# Normalized surface distance (NSD) with tau
+results[f"NSD_{tau}"] = mesh_metrics.nsd(tau=tau)
+# Boundary intersection over union (BIoU) with tau
+results[f"BIoU_{tau}"] = mesh_metrics.biou(tau=tau)
+
+# print metric values
+units = {"HD": "mm", "MASD": "mm", "ASSD": "mm", "NSD": "%", "BIoU": "%"}
+for k, v in results.items():
+    unit = units.get(k.split("_")[0], "")
+    f = 100.0 if unit == "%" else 1.0
+    print(f"{k}: {v*f:.2f} {unit}")
 
 # ----------------------------------------
 # If using `numpy.ndarray` representations, please note that the spacing must be
