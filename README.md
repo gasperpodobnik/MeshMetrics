@@ -1,25 +1,26 @@
 # MeshMetrics
-> Official Python-based implementation of `MeshMetrics` from [_Understanding implementation pitfalls of distance-based metrics for image segmentation_](https://arxiv.org/abs/2410.02630) and [_HDilemma: Are Open-Source Hausdorff Distance Implementations Equivalent?_](https://link.springer.com/chapter/10.1007/978-3-031-72114-4_30)
+> Official Python-based implementation of `MeshMetrics` from [_MeshMetrics: A Precise Implementation of Distance-Based Image Segmentation Metrics_](https://doi.org/10.48550/arXiv.2509.05670), motivated by the implementation pitfalls identified in [_Understanding Implementation Pitfalls of Distance-Based Metrics for Image Segmentation_](https://doi.org/10.48550/arXiv.2410.02630) and [_HDilemma: Are Open-Source Hausdorff Distance Implementations Equivalent?_](https://link.springer.com/chapter/10.1007/978-3-031-72114-4_30)
 
 ## About
-`MeshMetrics` provides a precise, mesh-based implementation of critical metrics used in the evaluation of image segmentation tasks. Quantitative performance metrics are fundamental for objective and reproducible segmentation assessments. Although *overlap-based* metrics - such as **Dice similarity coefficient** (DSC) and **intersection over union** (IoU) - are relatively straightforward to compute, *distance-based* metrics often lack uniform implementation across tools due to the complexity of distance calculations.
+`MeshMetrics` is a precise, mesh-based implementation of widely used distance-based metrics for evaluating image segmentation tasks. By leveraging mesh representations of segmentation, `MeshMetrics` ensures precision in distance and boundary element size calculations. For a detailed description and a comparison with other open-source tools supporting distance-based metric calculations, see [our paper](https://doi.org/10.48550/arXiv.2509.05670).
 
-`MeshMetrics` includes accurate implementations of key distance-based metrics:
-- **Hausdorff Distance** (HD) with $p$-th **percentile variants** (HD<sub>p</sub>)
-- **Mean Average Surface Distance** (MASD)
-- **Average Symmetric Surface Distance** (ASSD)
-- **Normalized Surface Distance** (NSD)
-- **Boundary Intersection over Union** (BIoU)
+The library supports both 2D and 3D data and works seamlessly with multiple segmentation formats (`numpy.ndarray`, `SimpleITK.Image`, and `vtk.vtkPolyData`). It also allows mixing representations between reference and predicted segmentations - for example, one input can be a mask image (`SimpleITK.Image`), while the other is a surface mesh (`vtk.vtkPolyData`). See the *Advanced usage* section in [`examples.ipynb`](examples.ipynb) for more details.
 
-`MeshMetrics` provides 2D and 3D implementations of distance-based metrics and supports computing metrics using different segmentation representations (`numpy.ndarray`, `SimpleITK.Image`, and `vtk.vtkPolyData`). Additionally, it allows for flexibility in representation between reference and predicted segmentations - one input can be a mask image (`SimpleITK.Image`), while the other can be a surface mesh (`vtk.vtkPolyData`). For more details, refer to the *Advanced usage* section in [`examples.ipynb`](examples.ipynb).
+Available distance-based metrics:
+- **Hausdorff distance** (HD) with $p$-th **percentile variants** (HD<sub>p</sub>)
+- **Mean average surface distance** (MASD)
+- **Average symmetric surface distance** (ASSD)
+- **Normalized surface distance** (NSD)
+- **Boundary intersection over union** (BIoU)
 
-By leveraging mesh representations of segmentation masks, `MeshMetrics` ensures precision in distance and boundary element size calculations. For further details and comparisons with other open-source tools supporting distance-based metric calculations, please refer to [our paper](https://arxiv.org/abs/2410.02630).
+For convenience, `MeshMetrics` also includes implementations of the **Dice similarity coefficient** (DSC) and **intersection over union** (IoU).
 
 ![overview](./data/paper_overview.png)
 
 If you use `MeshMetrics` in your work, please cite:
 ```
-Podobnik, G., & Vrtovec, T. (2025). Understanding implementation pitfalls of distance-based metrics for image segmentation. arXiv preprint arXiv:2410.02630.
+Podobnik, G., & Vrtovec, T. (2025). MeshMetrics: A Precise Implementation of Distance-Based Image Segmentation Metrics. arXiv preprint arXiv:2509.05670.
+Podobnik, G., & Vrtovec, T. (2025). Understanding Implementation Pitfalls of Distance-Based Metrics for Image Segmentation. arXiv preprint arXiv:2410.02630.
 ```
 
 ## Installation
@@ -30,10 +31,9 @@ sudo apt update && sudo apt install -y libxrender1
 ```
 
 ### Install `MeshMetrics` package
-First, clone the repository and install the required dependencies along with the `MeshMetrics` package using pip:
+Clone the repository and install the required dependencies along with the `MeshMetrics` package using pip:
 ```bash
-$ git clone https://github.com/gasperpodobnik/MeshMetrics.git
-$ pip install MeshMetrics/
+$ pip install git+https://github.com/gasperpodobnik/MeshMetrics.git
 ```
 
 ## Usage
@@ -50,8 +50,8 @@ data_dir = Path("data")
 dist_metrics = DistanceMetrics()
 
 # read binary segmentation masks
-ref_sitk = sitk.ReadImage(data_dir / "example_3d_ref_mask.nii.gz")
-pred_sitk = sitk.ReadImage(data_dir / "example_3d_pred_mask.nii.gz")
+ref_sitk = sitk.ReadImage(str(data_dir / "example_3d_ref_mask.nii.gz"))
+pred_sitk = sitk.ReadImage(str(data_dir / "example_3d_pred_mask.nii.gz"))
 
 # Set parameters
 percentile = 95  # percentile for HD
@@ -88,7 +88,7 @@ for k, v in results.items():
     print(f"{k}: {v*f:.2f} {unit}")
 
 # ----------------------------------------
-# If using `numpy.ndarray` representations, please note that the spacing must be
+# If using `numpy.ndarray` representations, note that the spacing must be
 # reordered when converting a `SimpleITK.Image` object to a `numpy.ndarray`
 ref_np = sitk.GetArrayFromImage(ref_sitk).astype(bool)
 pred_np = sitk.GetArrayFromImage(pred_sitk).astype(bool)
