@@ -173,7 +173,6 @@ class DistanceMetrics:
         AssertionError
             If `ref` or `pred` are not instances of vtk.vtkPolyData.
             If `ref` or `pred` are not closed meshes.
-            If `ref` or `pred` are not manifold meshes.
         """
         self.clear_cache()
 
@@ -324,7 +323,6 @@ class DistanceMetrics:
 
         elif isinstance(value, vtk.vtkPolyData):
             assert vtk_is_mesh_closed(value), f"{name} mesh must be closed"
-            assert vtk_is_mesh_manifold(value), f"{name} mesh must be manifold"
             setattr(self, attr, value)
 
         else:
