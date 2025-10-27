@@ -495,7 +495,7 @@ def vtk_meshes_bbox_sitk_image(
     
     # if both meshes are empty, return an empty sitk image
     if mesh1.GetNumberOfPoints() == 0 and mesh2.GetNumberOfPoints() == 0:
-        meta_sitk = sitk.Image()
+        meta_sitk = sitk.GetImageFromArray(np.zeros((0,)*ndim))
         meta_sitk.SetSpacing(spacing)
         return meta_sitk
 
