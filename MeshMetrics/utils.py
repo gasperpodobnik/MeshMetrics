@@ -492,6 +492,10 @@ def vtk_meshes_bbox_sitk_image(
     tolerance: tuple = None,
 ) -> sitk.Image:
     ndim = len(spacing)
+    
+    # if both meshes are empty, return an empty sitk image
+    if mesh1.GetNumberOfPoints() == 0 and mesh2.GetNumberOfPoints() == 0:
+        return sitk.Image()
 
     # create a meta image SimpleITK that encompasses both masks
     ref_b = get_mesh_bounds(mesh1)
