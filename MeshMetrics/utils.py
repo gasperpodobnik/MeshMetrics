@@ -423,7 +423,7 @@ def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
 
     # check for empty mesh or empty image
     if mesh_vtk is None or np.prod(meta_sitk.GetSize()) == 0:
-        return sitk.Image()
+        return meta_sitk
 
     vtkImage = sitk2vtk(meta_sitk)
 
@@ -495,7 +495,9 @@ def vtk_meshes_bbox_sitk_image(
     
     # if both meshes are empty, return an empty sitk image
     if mesh1.GetNumberOfPoints() == 0 and mesh2.GetNumberOfPoints() == 0:
-        return sitk.Image()
+        meta_sitk = sitk.Image()
+        meta_sitk.SetSpacing(spacing)
+        return meta_sitk
 
     # create a meta image SimpleITK that encompasses both masks
     ref_b = get_mesh_bounds(mesh1)
