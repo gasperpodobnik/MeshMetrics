@@ -4,7 +4,7 @@
 ## About
 `MeshMetrics` is a precise, mesh-based implementation of widely used distance-based metrics for evaluating image segmentation tasks. By leveraging mesh representations of segmentation, `MeshMetrics` ensures precision in distance and boundary element size calculations. For a detailed description and a comparison with other open-source tools supporting distance-based metric calculations, see [our paper](https://doi.org/10.48550/arXiv.2509.05670).
 
-The library supports both 2D and 3D data and works seamlessly with multiple segmentation formats (`numpy.ndarray`, `SimpleITK.Image`, and `vtk.vtkPolyData`). It also allows mixing representations between reference and predicted segmentations - for example, one input can be a mask image (`SimpleITK.Image`), while the other is a surface mesh (`vtk.vtkPolyData`). See the *Advanced usage* section in [`examples.ipynb`](examples.ipynb) for more details.
+The library supports both 2D and 3D data and works seamlessly with multiple segmentation formats (`numpy.ndarray`, `SimpleITK.Image`, `vtk.vtkPolyData`, `trimesh.Trimesh`, and `meshio.Mesh`). It also allows mixing representations between reference and predicted segmentations - for example, one input can be a mask image (`SimpleITK.Image`), while the other is a surface mesh (`vtk.vtkPolyData`/`trimesh.Trimesh`/`meshio.Mesh`). See the *Advanced usage* section in [`examples.ipynb`](examples.ipynb) for more details.
 
 Available distance-based metrics:
 - **Hausdorff distance** (HD) with $p$-th **percentile variants** (HD<sub>p</sub>)
