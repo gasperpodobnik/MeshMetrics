@@ -5,7 +5,7 @@ import numpy as np
 import SimpleITK as sitk
 import vtk
 
-from vtk.util.numpy_support import vtk_to_numpy
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtkIdTypeArray, numpy_to_vtk
 from SimpleITK.utilities.vtk import sitk2vtk, vtk2sitk
 
 
@@ -400,9 +400,9 @@ def vtk_distance_field(
         ref_sitk_3D, pred_sitk_3D = sitk_add_axis_to_end(
             ref_sitk
         ), sitk_add_axis_to_end(pred_sitk)
-        ref_surface, pred_surface = vtk_3D_meshing_sn(
+        ref_surface, pred_surface = vtk_3D_meshing(
             ref_sitk_3D, pad=False
-        ), vtk_3D_meshing_sn(pred_sitk_3D, pad=False)
+        ), vtk_3D_meshing(pred_sitk_3D, pad=False)
     else:
         ref_surface, pred_surface = ref_mesh, pred_mesh
 
@@ -492,10 +492,10 @@ def vtk_meshes_bbox_sitk_image(
     tolerance: tuple = None,
 ) -> sitk.Image:
     ndim = len(spacing)
-    
+
     # if both meshes are empty, return an empty sitk image
     if mesh1.GetNumberOfPoints() == 0 and mesh2.GetNumberOfPoints() == 0:
-        meta_sitk = sitk.GetImageFromArray(np.zeros((0,)*ndim))
+        meta_sitk = sitk.GetImageFromArray(np.zeros((0,) * ndim))
         meta_sitk.SetSpacing(spacing)
         return meta_sitk
 
@@ -593,3 +593,101 @@ def vtk_write_polydata(vtk_polydata: vtk.vtkPolyData, pth: Union[str, Path]):
     writer.SetInputData(vtk_polydata)
     writer.SetFileName(str(pth))
     writer.Write()
+
+
+# ------------------------------
+def trimesh_to_vtk(mesh: "trimesh.Trimesh") -> vtk.vtkPolyData:
+    """
+    Convert a trimesh.Trimesh object (2D polygon or 3D mesh) to vtk.vtkPolyData.
+
+    Parameters
+    ----------
+    mesh : trimesh.Trimesh
+        The input mesh. Can be 2D (Nx2) or 3D (Nx3).
+
+    Returns
+    -------
+    vtk.vtkPolyData
+        VTK PolyData object representing the mesh.
+    """
+    # Ensure vertices are Nx3
+    vertices = np.array(mesh.vertices)
+    if vertices.shape[1] == 2:
+        vertices = np.hstack([vertices, np.zeros((vertices.shape[0], 1))])
+
+    # Convert vertices to vtkPoints
+    points = vtk.vtkPoints()
+    points.SetData(numpy_to_vtk(vertices, deep=True))
+
+    polydata = vtk.vtkPolyData()
+    polydata.SetPoints(points)
+
+    # Handle faces if present
+    if mesh.faces is not None and len(mesh.faces) > 0:
+        faces = np.array(mesh.faces, dtype=np.int64)
+        faces_flat = np.hstack(
+            [np.full((faces.shape[0], 1), faces.shape[1], dtype=np.int64), faces]
+        ).ravel()
+        vtk_faces = numpy_to_vtkIdTypeArray(faces_flat, deep=True)
+        cells = vtk.vtkCellArray()
+        cells.SetCells(faces.shape[0], vtk_faces)
+        polydata.SetPolys(cells)
+    else:
+        # If no faces, treat as a set of points (use vertices only)
+        polydata.SetVerts(vtk.vtkCellArray())
+
+    polydata.BuildCells()
+    polydata.BuildLinks()
+    return polydata
+
+
+def meshio_to_vtk(mesh: "meshio.Mesh") -> vtk.vtkPolyData:
+    """
+    Convert a meshio.Mesh object to vtk.vtkPolyData.
+    Works with 2D (polygonal) and 3D meshes.
+
+    Parameters
+    ----------
+    mesh : meshio.Mesh
+        The input mesh.
+
+    Returns
+    -------
+    vtk.vtkPolyData
+        VTK PolyData object.
+    """
+
+    # Get points
+    points = np.array(mesh.points)
+    if points.shape[1] == 2:
+        points = np.hstack([points, np.zeros((points.shape[0], 1))])  # pad z for 2D
+
+    vtk_points = vtk.vtkPoints()
+    vtk_points.SetData(numpy_to_vtk(points, deep=True))
+
+    polydata = vtk.vtkPolyData()
+    polydata.SetPoints(vtk_points)
+
+    # Find cells that can be treated as polygons/triangles
+    # mesh.cells is a list of (cell_type, array_of_indices)
+    polys = []
+    for cell_block in mesh.cells:
+        cell_type, data = cell_block.type, cell_block.data
+        if cell_type in ("triangle", "quad", "polygon"):
+            polys.append(data)
+    if polys:
+        polys = np.vstack(polys)
+        faces_flat = np.hstack(
+            [np.full((polys.shape[0], 1), polys.shape[1], dtype=np.int64), polys]
+        ).ravel()
+        vtk_faces = numpy_to_vtkIdTypeArray(faces_flat, deep=True)
+        cells = vtk.vtkCellArray()
+        cells.SetCells(polys.shape[0], vtk_faces)
+        polydata.SetPolys(cells)
+    else:
+        # fallback: only vertices
+        polydata.SetVerts(vtk.vtkCellArray())
+
+    polydata.BuildCells()
+    polydata.BuildLinks()
+    return polydata

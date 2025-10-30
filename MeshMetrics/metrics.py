@@ -14,8 +14,30 @@ from .utils import (
     vtk_distance_field,
     vtk_voxelizer,
     vtk_is_mesh_closed,
-    vtk_is_mesh_manifold,
     vtk_meshes_bbox_sitk_image,
+    trimesh_to_vtk,
+    meshio_to_vtk,
+)
+
+try:
+    import trimesh
+except ImportError:
+    trimesh = None
+
+try:
+    import meshio
+except ImportError:
+    meshio = None
+
+MeshTypes = Union[vtk.vtkPolyData, "trimesh.Trimesh", "meshio.Mesh"]
+RUNTIME_MESH_TYPES = tuple(
+    t
+    for t in (
+        vtk.vtkPolyData,
+        getattr(trimesh, "Trimesh", None),
+        getattr(meshio, "Mesh", None),
+    )
+    if t is not None
 )
 
 
@@ -36,8 +58,8 @@ class DistanceMetrics:
 
     def set_input(
         self,
-        ref: Union[np.ndarray, sitk.Image, vtk.vtkPolyData],
-        pred: Union[np.ndarray, sitk.Image, vtk.vtkPolyData],
+        ref: Union[np.ndarray, sitk.Image, MeshTypes],
+        pred: Union[np.ndarray, sitk.Image, MeshTypes],
         spacing: Union[tuple, list, np.ndarray] = None,
     ):
         """General input setter method that automatically detects the input type.
@@ -47,12 +69,12 @@ class DistanceMetrics:
             This is to avoid potential issues with different spatial positions of segmentation masks
             (i.e. mesh in world coordinate system and mask in local coordinate system).
 
-            - If both `ref` and `pred` are VTK polydata, the `spacing` must be set.
+            - If both `ref` and `pred` are mesh types, the `spacing` must be set.
             This is because some calculations are performed in grid space (see BIoU).
 
             - If both `ref` and `pred` are SimpleITK images, the spacing is automatically set from the images and should not be provided.
 
-            - For all other combinations (`ref` is SimpleITK image and `pred` is VTK polydata or vice versa),
+            - For all other combinations (`ref` is SimpleITK image and `pred` is mesh type or vice versa),
             the spacing will be inferred from the SimpleITK image input and should not be provided.
             The input mesh should be in world coordinates.
         """
@@ -74,15 +96,17 @@ class DistanceMetrics:
             ), "spacing must not be provided if both `ref` and `pred` are SimpleITK images"
             self.spacing = ref.GetSpacing()
             self._set_input_SimpleITK(ref, pred)
-        # both vtk.vtkPolyData
-        elif isinstance(ref, vtk.vtkPolyData) and isinstance(pred, vtk.vtkPolyData):
+        # both MeshTypes
+        elif isinstance(ref, RUNTIME_MESH_TYPES) and isinstance(
+            pred, RUNTIME_MESH_TYPES
+        ):
             assert (
                 spacing is not None
-            ), "spacing must be provided if both `ref` and `pred` are vtkPolyData"
+            ), "spacing must be provided if both `ref` and `pred` are mesh types (vtk.vtkPolyData, trimesh.Trimesh or meshio.Mesh)"
             self._set_input_vtk(ref, pred, spacing)
-        # one is sitk.Image and the other is vtk.vtkPolyData
-        elif isinstance(ref, (sitk.Image, vtk.vtkPolyData)) and isinstance(
-            pred, (sitk.Image, vtk.vtkPolyData)
+        # one is sitk.Image and the other is MeshTypes
+        elif isinstance(ref, (sitk.Image, *RUNTIME_MESH_TYPES)) and isinstance(
+            pred, (sitk.Image, *RUNTIME_MESH_TYPES)
         ):
             assert (
                 spacing is None
@@ -98,10 +122,10 @@ class DistanceMetrics:
             self._set_input_vtk(ref, pred, spacing)
         else:
             assert isinstance(
-                pred, (sitk.Image, vtk.vtkPolyData)
-            ), "if `ref` is SimpleITK image, `pred` must be SimpleITK image or vtkPolyData"
+                pred, (sitk.Image, *RUNTIME_MESH_TYPES)
+            ), "if `ref` is SimpleITK.Image, `pred` must be SimpleITK.Image, vtk.vtkPolyData, trimesh.Trimesh or meshio.Mesh"
             raise ValueError(
-                "ref must be a numpy array, SimpleITK image or vtkPolyData"
+                "ref must be a numpy.ndarray, SimpleITK.Image, vtk.vtkPolyData, trimesh.Trimesh or meshio.Mesh"
             )
 
     def _set_input_numpy(
@@ -154,24 +178,24 @@ class DistanceMetrics:
 
     def _set_input_vtk(
         self,
-        ref: vtk.vtkPolyData,
-        pred: vtk.vtkPolyData,
+        ref: MeshTypes,
+        pred: MeshTypes,
         spacing: Union[tuple, list, np.ndarray],
     ):
         """
         Set the input VTK polydata for reference and prediction meshes along with the spacing.
         Parameters
         ----------
-        ref : vtk.vtkPolyData
-            The reference mesh as a VTK polydata object.
-        pred : vtk.vtkPolyData
-            The prediction mesh as a VTK polydata object.
+        ref : vtk.vtkPolyData, trimesh.Trimesh, meshio.Mesh
+            The reference mesh.
+        pred : vtk.vtkPolyData, trimesh.Trimesh, meshio.Mesh
+            The prediction mesh.
         spacing : Union[tuple, list, np.ndarray]
             The spacing is required, because some calculations are performed in grid space (see BIoU).
         Raises
         ------
         AssertionError
-            If `ref` or `pred` are not instances of vtk.vtkPolyData.
+            If `ref` or `pred` are not instances of vtk.vtkPolyData, trimesh.Trimesh or meshio.Mesh.
             If `ref` or `pred` are not closed meshes.
         """
         self.clear_cache()
@@ -227,7 +251,7 @@ class DistanceMetrics:
             assert len(value) in [2, 3], "only 2D or 3D calculations are supported"
             self._spacing = tuple(value)
 
-    def _set_np(self, name: str, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
+    def _set_np(self, name: str, value: Union[np.ndarray, sitk.Image, MeshTypes]):
         """Internal helper for ref_np and pred_np setters.
         name: 'ref' or 'pred'
         """
@@ -250,19 +274,17 @@ class DistanceMetrics:
             ), f"mask must be the same object as `{name}_sitk`"
             setattr(self, attr, sitk2np(value))
 
-        elif isinstance(value, vtk.vtkPolyData):
+        elif isinstance(value, RUNTIME_MESH_TYPES):
             raise NotImplementedError(
-                f"Conversion from vtk.vtkPolyData to numpy.ndarray is not implemented for {name}_np"
+                f"Conversion from {type(value)} to numpy.ndarray is not implemented for {name}_np"
             )
 
         else:
             raise ValueError(
-                f"{name}_np mask must be a numpy.ndarray, SimpleITK.Image, or vtk.vtkPolyData"
+                f"{name}_np mask must be a numpy.ndarray or SimpleITK.Image"
             )
 
-    def _set_sitk(
-        self, name: str, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]
-    ):
+    def _set_sitk(self, name: str, value: Union[np.ndarray, sitk.Image]):
         """Internal helper for ref_sitk and pred_sitk setters.
         name: 'ref' or 'pred'
         """
@@ -283,20 +305,16 @@ class DistanceMetrics:
             setattr(self, attr, value)
             self.spacing = value.GetSpacing()
 
-        elif isinstance(value, vtk.vtkPolyData):
+        elif isinstance(value, RUNTIME_MESH_TYPES):
             raise NotImplementedError(
-                f"Conversion from vtk.vtkPolyData to SimpleITK.Image needs "
+                f"Conversion from {type(value)} to SimpleITK.Image needs "
                 f"to happen in the {name}_sitk setter input"
             )
 
         else:
-            raise ValueError(
-                "mask must be a numpy.ndarray, SimpleITK.Image or vtk.vtkPolyData"
-            )
+            raise ValueError("mask must be a numpy.ndarray or SimpleITK.Image")
 
-    def _set_vtk(
-        self, name: str, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]
-    ):
+    def _set_vtk(self, name: str, value: Union[np.ndarray, sitk.Image, MeshTypes]):
         """Internal helper for ref_vtk and pred_vtk setters.
         name: 'ref' or 'pred'
         """
@@ -321,8 +339,21 @@ class DistanceMetrics:
                 ), f"mask must be the same object as `{name}_sitk`"
             setattr(self, attr, vtk_meshing(sitk_attr))
 
-        elif isinstance(value, vtk.vtkPolyData):
+        elif isinstance(value, RUNTIME_MESH_TYPES):
+            if isinstance(value, vtk.vtkPolyData):
+                pass
+            elif trimesh is not None and isinstance(value, trimesh.Trimesh):
+                value = trimesh_to_vtk(value)
+            elif meshio is not None and isinstance(value, meshio.Mesh):
+                value = meshio_to_vtk(value)
+            else:
+                raise ValueError(
+                    f"{name}_vtk mesh must be vtk.vtkPolyData, trimesh.Trimesh or meshio.Mesh"
+                )
             assert vtk_is_mesh_closed(value), f"{name} mesh must be closed"
+            # We no longer check for non-manifold verts/edges, as some valid meshes can be non-manifold
+            # due to a bug in vtk SurfaceNets. However, this does not impact any of the calculations,
+            # as they all rely on absolute distances to the mesh surface.
             setattr(self, attr, value)
 
         else:
@@ -351,7 +382,7 @@ class DistanceMetrics:
         return self._ref_sitk
 
     @ref_sitk.setter
-    def ref_sitk(self, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
+    def ref_sitk(self, value: Union[np.ndarray, sitk.Image]):
         self._set_sitk("ref", value)
 
     @property
@@ -359,7 +390,7 @@ class DistanceMetrics:
         return self._pred_sitk
 
     @pred_sitk.setter
-    def pred_sitk(self, value: Union[sitk.Image, np.ndarray, vtk.vtkPolyData]):
+    def pred_sitk(self, value: Union[sitk.Image, np.ndarray]):
         self._set_sitk("pred", value)
 
     @property
@@ -367,7 +398,7 @@ class DistanceMetrics:
         return self._ref_vtk
 
     @ref_vtk.setter
-    def ref_vtk(self, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
+    def ref_vtk(self, value: Union[np.ndarray, sitk.Image, MeshTypes]):
         self._set_vtk("ref", value)
 
     @property
@@ -375,7 +406,7 @@ class DistanceMetrics:
         return self._pred_vtk
 
     @pred_vtk.setter
-    def pred_vtk(self, value: Union[np.ndarray, sitk.Image, vtk.vtkPolyData]):
+    def pred_vtk(self, value: Union[np.ndarray, sitk.Image, MeshTypes]):
         self._set_vtk("pred", value)
 
     @property
