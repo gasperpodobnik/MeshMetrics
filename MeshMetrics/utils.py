@@ -440,8 +440,6 @@ def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
     if mesh_vtk is None or np.prod(meta_sitk.GetSize()) == 0:
         return meta_sitk
 
-    vtkImage = sitk2vtk(meta_sitk)
-
     ndim = meta_sitk.GetDimension()
     direction = np.array(meta_sitk.GetDirection()).reshape(ndim, ndim)
     origin = np.array(meta_sitk.GetOrigin())
