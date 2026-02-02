@@ -418,6 +418,21 @@ def vtk_distance_field(
 
 
 def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
+    """
+    Voxelize a VTK mesh using SimpleITK image metadata, correctly handling image direction.
+    
+    Parameters:
+    -----------
+    mesh_vtk : vtk.vtkPolyData
+        Input mesh to voxelize
+    meta_sitk : sitk.Image
+        Reference SimpleITK image providing spacing, origin, direction, and extent
+    
+    Returns:
+    --------
+    sitk.Image
+        Voxelized binary mask matching the reference image geometry
+    """
     assert isinstance(mesh_vtk, vtk.vtkPolyData), "Mesh must be vtkPolyData"
     assert isinstance(meta_sitk, sitk.Image), "Segmentation must be SimpleITK image"
 
@@ -428,55 +443,78 @@ def vtk_voxelizer(mesh_vtk: vtk.vtkPolyData, meta_sitk: sitk.Image):
     vtkImage = sitk2vtk(meta_sitk)
 
     ndim = meta_sitk.GetDimension()
-    if not np.allclose(
-        meta_sitk.GetDirection(), np.eye(meta_sitk.GetDimension()).flatten()
-    ):
-        # vtk does not provide support for non-standard direction of the target image,
-        # so we take care of this manually
-        direction = np.array(meta_sitk.GetDirection()).reshape(ndim, ndim)
-
+    direction = np.array(meta_sitk.GetDirection()).reshape(ndim, ndim)
+    origin = np.array(meta_sitk.GetOrigin())
+    spacing = np.array(meta_sitk.GetSpacing())
+    size = np.array(meta_sitk.GetSize())
+    
+    # Check if we need to handle non-standard direction
+    has_non_standard_direction = not np.allclose(direction, np.eye(ndim))
+    
+    if has_non_standard_direction:
+        # Create the full 4x4 transformation matrix
+        # This transforms from world space to voxel space aligned with axes
         T = np.eye(4)
-        T[:ndim, :ndim] = direction
-        T = np.linalg.inv(T)
-
-        # Set up the transform
-        vtk_affine = vtk.vtkTransform()
-        vtk_affine.SetMatrix(T.flatten())
-        # Apply the transform
-        vtk_transform = vtk.vtkTransformPolyDataFilter()
-        vtk_transform.SetInputData(mesh_vtk)
-        vtk_transform.SetTransform(vtk_affine)
-        vtk_transform.Update()
-        mesh_vtk = vtk_transform.GetOutput()
-
-    spacing = vtkImage.GetSpacing()
-    origin = vtkImage.GetOrigin()
-    extent = vtkImage.GetExtent()
-
-    # polygonal data --> image stencil:
+        T[:ndim, :ndim] = direction.T  # Transpose for correct orientation
+        T[:ndim, 3] = origin
+        
+        # Create VTK transform (inverse to transform mesh into aligned space)
+        vtk_transform = vtk.vtkTransform()
+        vtk_matrix = vtk.vtkMatrix4x4()
+        for i in range(4):
+            for j in range(4):
+                vtk_matrix.SetElement(i, j, T[i, j])
+        vtk_transform.SetMatrix(vtk_matrix)
+        vtk_transform.Inverse()
+        
+        # Transform the mesh
+        transform_filter = vtk.vtkTransformPolyDataFilter()
+        transform_filter.SetInputData(mesh_vtk)
+        transform_filter.SetTransform(vtk_transform)
+        transform_filter.Update()
+        mesh_vtk = transform_filter.GetOutput()
+        
+        # Use axis-aligned origin and extent for voxelization
+        voxel_origin = np.zeros(3)
+        voxel_spacing = spacing
+        voxel_extent = [0, size[0] - 1, 0, size[1] - 1, 0, (size[2] - 1 if ndim == 3 else 0)]
+    else:
+        # Standard direction - use original parameters
+        voxel_origin = origin
+        voxel_spacing = spacing
+        extent_max = size - 1
+        if ndim == 2:
+            extent_max = np.append(extent_max, 0)
+        voxel_extent = [0, extent_max[0], 0, extent_max[1], 0, extent_max[2]]
+    
+    # Voxelize: polygonal data --> image stencil
     poly2stenc = vtk.vtkPolyDataToImageStencil()
     poly2stenc.SetInputData(mesh_vtk)
-    poly2stenc.SetOutputOrigin(origin)
-    poly2stenc.SetOutputSpacing(spacing)
-    poly2stenc.SetOutputWholeExtent(extent)
+    poly2stenc.SetOutputOrigin(list(map(float, voxel_origin)))
+    poly2stenc.SetOutputSpacing(list(map(float, voxel_spacing)))
+    poly2stenc.SetOutputWholeExtent(voxel_extent)
     poly2stenc.Update()
-    stenc = poly2stenc.GetOutput()
-
-    vtkimageStencilToImage = vtk.vtkImageStencilToImage()
-    vtkimageStencilToImage.SetInputData(stenc)
-    vtkimageStencilToImage.SetOutsideValue(0)
-    vtkimageStencilToImage.SetInsideValue(1)
-    vtkimageStencilToImage.Update()
-
-    voxelized_sitk = vtk2sitk(vtkimageStencilToImage.GetOutput())
-
-    # for 2D cases, vtk adds axial dim, so we remove it
+    
+    # Convert stencil to image
+    stencil_to_image = vtk.vtkImageStencilToImage()
+    stencil_to_image.SetInputData(poly2stenc.GetOutput())
+    stencil_to_image.SetOutsideValue(0)
+    stencil_to_image.SetInsideValue(1)
+    stencil_to_image.Update()
+    
+    # Convert VTK image to SimpleITK
+    voxelized_sitk = vtk2sitk(stencil_to_image.GetOutput())
+    
+    # For 2D cases, remove the added axial dimension
     if ndim == 2:
         voxelized_sitk = voxelized_sitk[:, :, 0]
+    
+    # Set the correct metadata
+    voxelized_sitk.SetOrigin(meta_sitk.GetOrigin())
+    voxelized_sitk.SetSpacing(meta_sitk.GetSpacing())
     voxelized_sitk.SetDirection(meta_sitk.GetDirection())
-
+    
     return voxelized_sitk
-
 
 def get_mesh_bounds(mesh: vtk.vtkPolyData) -> np.ndarray:
     bounds = np.array(mesh.GetBounds())
