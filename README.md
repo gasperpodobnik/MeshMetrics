@@ -33,7 +33,7 @@ sudo apt update && sudo apt install -y libxrender1
 ### Install `MeshMetrics` package
 Clone the repository and install the required dependencies along with the `MeshMetrics` package using pip:
 ```bash
-$ pip install git+https://github.com/gasperpodobnik/MeshMetrics.git
+pip install git+https://github.com/gasperpodobnik/MeshMetrics.git
 ```
 
 ## Usage
